@@ -71,6 +71,11 @@ public:
         this->onehot = true;
     }
 
+    void setBinary()
+    {
+        this->onehot = false;
+    }
+
     void setVerbose()
     {
         this->verbose = true;

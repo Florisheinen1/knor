@@ -566,8 +566,10 @@ handleOptions(int &argc, char**& argv)
             ("naive", "Use the naive splitting procedure (not recommended)")
             ("explicit", "Use the explicit splitting procedure (not recommended)")
             ("real", "Only check realiziability (no synthesis)")
-            ("bisim", "Apply bisimulation minimisation to the solution")
+            ("bisim", "Do not apply bisimulation minimisation to the solution")
+            ("no-bisim", "Apply bisimulation minimisation to the solution")
             ("onehot", "Use onehot encoding for the states")
+            ("binary", "Use binary encoding for the states")
             ("isop", "Convert BDDs to AIG using ISOP (instead of Shannon expansion)")
             ("compress", "Compress the AIG using ABC")
             ("drewrite", "Compress the AIG using ABCs commands drw and drf")
@@ -701,7 +703,18 @@ main(int argc, char* argv[])
     if (verbose) sylvan_gc_hook_pregc(TASK(gc_start));
     if (verbose) sylvan_gc_hook_postgc(TASK(gc_end));
 
-    bool explicit_solver = options["sym"].count() == 0;
+    std::string solver = "sym"; // default solver for synthesis
+    if (options["real"].count() > 0) {
+        solver = "tl"; // default solver for realizability
+    }
+
+    if (options["sym"].count() > 0) solver = "sym";
+    pg::Solvers solvers;
+    for (unsigned id=0; id<solvers.count(); id++) {
+        if (options.count(solvers.label(id))) solver = solvers.label(id);
+    }
+
+    bool explicit_solver = solver != "sym";
     bool naive_splitting = options["naive"].count() > 0;
     bool explicit_splitting = options["explicit"].count() > 0;
     bool write_pg = options["print-game"].count() > 0;
@@ -752,12 +765,6 @@ main(int argc, char* argv[])
 
         // OK, fire up the engine
         std::stringstream log;
-
-        std::string solver = "tl";
-        pg::Solvers solvers;
-        for (unsigned id=0; id<solvers.count(); id++) {
-            if (options.count(solvers.label(id))) solver = solvers.label(id);
-        }
 
         pg::Oink engine(*game, verbose ? std::cerr : log);
         engine.setTrace(0); //verbose ? 1 : 0); actually don´t -- maybe add a 2nd verbosity level later
@@ -984,7 +991,7 @@ main(int argc, char* argv[])
             exit(10);
         }
 
-        if (options["bisim"].count() > 0) {
+        if (options["no-bisim"].count() == 0 || options["bisim"].count() > 0) {
             const double t_before = wctime();
             MTBDD partition = RUN(min_lts_strong, sym);
             mtbdd_protect(&partition);
@@ -1022,6 +1029,11 @@ main(int argc, char* argv[])
         }
         if (options["isop"].count() > 0) {
             maker.setIsop();
+        }
+        // default: onehot
+        maker.setOneHot();
+        if (options["binary"].count() > 0) {
+            maker.setBinary();
         }
         if (options["onehot"].count() > 0) {
             maker.setOneHot();
