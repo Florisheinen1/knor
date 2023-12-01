@@ -41,32 +41,32 @@ def generate_solve_commands_for_file(file_path: str, file_name: str):
 		# Fixpoint algorithm, artrocious behaviour
 		"--fpi",	# Recommended
 		"--fpj",	# Recommended
-		"--fpjg",
+		# "--fpjg",
 		# Priority promotion family
 		"--npp",	# Recommended
-		"--pp",
-		"--ppp",
-		"--rr",
-		"--dp",
-		"--rrdp",
+		# "--pp",
+		# "--ppp",
+		# "--rr",
+		# "--dp",
+		# "--rrdp",
 		# Zielonka's recursive algorithm
-		"--zlk",
-		"--uzlk",
-		"--zlkq",
-		"--zlkpp-std",
-		"--zlkpp-waw",
-		"--zlkpp-liv",
+		# "--zlk",
+		# "--uzlk",
+		# "--zlkq",
+		# "--zlkpp-std",
+		# "--zlkpp-waw",
+		# "--zlkpp-liv",
 		# Strategy improvement
-		"--psi",
-		"--ssi",
+		# "--psi",
+		# "--ssi",
 		# Progress measures
-		"--tspm",
-		"--spm",
-		"--mspm",
-		"--sspm",
-		"--bsspm",
-		"--qpt",
-		"--bqpt",
+		# "--tspm",
+		# "--spm",
+		# "--mspm",
+		# "--sspm",
+		# "--bsspm",
+		# "--qpt",
+		# "--bqpt",
 	]
 
 	output_args = [
@@ -85,11 +85,19 @@ def generate_solve_commands_for_file(file_path: str, file_name: str):
 		for c in itertools.combinations(knor_args, i):
 			l.append(c)
 		knor_arg_combinations.extend(l)
+
+	all_arg_combinations = []
+	# Now, combine knor arg combos with every possible oink arg
+	for oink_arg in oink_solver_args:
+		for knor_arg_combo in knor_arg_combinations:
+			new_combo = list(knor_arg_combo)
+			new_combo.append(oink_arg)
+			all_arg_combinations.append(tuple(new_combo))
 	
 	# COMMAND:
 	commands = []
 	# ./knor ../examples/amba_decomposed_arbiter_10.tlsf.ehoa --bisim --onehot --compress -a -v > controller.aag
-	for arg_combo in knor_arg_combinations:
+	for arg_combo in all_arg_combinations:
 		file_arg_text = "".join(arg_combo) # Args used in output filename
 		command_arg_text = " ".join(arg_combo) # Args used in knor command
 
