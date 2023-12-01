@@ -124,14 +124,31 @@ def has_done_command_before(profiling_data, source_file_path, args):
 					return True
 	return False
 
-def insert_command_result_into_profiling_data(data, cmd, args, input, output, time, realizable):
+def is_known_unrealizable(profiling_data, source_file_path):
+	for source_file in profiling_data["problem_files"]:
+		if source_file["source"] == source_file_path and not source_file["realizable"]:
+			return True
+	return False
+
+def set_is_unrealizable(profiling_data, source_file_path):
+	for source_file in profiling_data["problem_files"]:
+		if source_file["source"] == source_file_path:
+			source_file["realizable"] = False
+			return
+	profiling_data["problem_files"].append({
+		"source": source_file_path,
+		"realizable": False,
+		"commands": []
+	})
+		
+
+def insert_command_result_into_profiling_data(data, cmd, args, input, output, time):
 	# Prepare the data to be inserted
 	command_data = {
 		"command_used": cmd,
 		"args_used": list(args),
 		"output_file": output,
-		"solve_time": time,
-		"realizable": realizable
+		"solve_time": time
 	}
 
 	# Add if source file entry already exists
@@ -143,6 +160,7 @@ def insert_command_result_into_profiling_data(data, cmd, args, input, output, ti
 	# Otherwise, need to add the data first, 
 	data["problem_files"].append({
 		"source": input,
+		"realizable": True,
 		"commands": [
 			command_data
 		]
@@ -179,7 +197,7 @@ def prepare_non_minimized_aigs():
 
 	# For every command we created
 	for count, (cmd, args, source, out) in enumerate(commands):
-		if not has_done_command_before(profiling_data, source, args):
+		if not has_done_command_before(profiling_data, source, args) and not is_known_unrealizable(profiling_data, source):
 			cmd_start = time.time()
 			result = subprocess.run([cmd], shell=True)
 			cmd_end = time.time()
@@ -188,10 +206,20 @@ def prepare_non_minimized_aigs():
 			script_now = time.time()
 			script_duration = script_now - script_start
 
-			print("CMD:", count, "/", commands_count, "runtime:", script_duration)
+			print("CMD:", count, "/", commands_count, "code", result.returncode, "runtime:", script_duration)
+			
+			if result.returncode == 10:
+				insert_command_result_into_profiling_data(profiling_data, cmd, args, source, out, diff)
+				store_profiling_stats_file(profiling_data)
+			elif result.returncode == 20:
+				# This problem is not realizable. Set that in the profiler data
+				set_is_unrealizable(profiling_data, source)
+				store_profiling_stats_file(profiling_data)
+				print("Problem " + source + " is unrealizable")
+			else:
+				print("Failed to execute command: '" + cmd + "'")
 
-			insert_command_result_into_profiling_data(profiling_data, cmd, args, source, out, diff, result.returncode == 10)
-			store_profiling_stats_file(profiling_data)
+
 
 if __name__ == "__main__":
 	prepare_non_minimized_aigs()
