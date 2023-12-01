@@ -839,14 +839,14 @@ main(int argc, char* argv[])
 
     if (options["real"].count() > 0) {
         if (realizable) {
-            std::cout << "REALIZABLE" << std::endl;
             if (verbose) {
+            	std::cout << "REALIZABLE" << std::endl;
                 std::cerr << "\033[1;37mtotal time was " << std::fixed << (wctime() - t_before_parsing) << " sec.\033[m" << std::endl;
             }
             exit(10);
         } else {
-            std::cout << "UNREALIZABLE" << std::endl;
             if (verbose) {
+            	std::cout << "-UNREALIZABLE" << std::endl;
                 std::cerr << "\033[1;37mtotal time was " << std::fixed << (wctime() - t_before_parsing) << " sec.\033[m" << std::endl;
             }
             exit(20);
@@ -875,14 +875,23 @@ main(int argc, char* argv[])
         const bool best = options["best"].count() > 0;
 
         if (best) {
+			// ==== No bisim ==== //
+			// - no onehot		no isop
             AIGmaker var1(data, sym);
             var1.process();
+			// - no onehot		isop
             AIGmaker var2(data, sym);
             var2.setIsop();
             var2.process();
+			// - onehot			no isop
             AIGmaker var3(data, sym);
             var3.setOneHot();
             var3.process();
+			// - onehot			isop
+            AIGmaker var4(data, sym);
+            var4.setOneHot();
+			var4.setIsop();
+            var4.process();
 
             const double t_before = wctime();
             MTBDD partition = RUN(min_lts_strong, sym);
@@ -891,15 +900,25 @@ main(int argc, char* argv[])
             mtbdd_unprotect(&partition);
             const double t_after = wctime();
             if (verbose) std::cerr << "\033[1;37mfinished bisimulation minimisation in " << std::fixed << (t_after - t_before) << " sec.\033[m" << std::endl;
+			std::cerr << "-BISIM_TIME: " << std::fixed << (t_after - t_before) << std::endl;
 
+			// ==== Bisim ==== //
+			// - no onehot		no isop
             AIGmaker var1b(data, sym);
             var1b.process();
+			// - no onehot		isop
             AIGmaker var2b(data, sym);
             var2b.setIsop();
             var2b.process();
+			// - onehot			no isop
             AIGmaker var3b(data, sym);
             var3b.setOneHot();
             var3b.process();
+			// - onehot			isop
+            AIGmaker var4b(data, sym);
+            var4b.setOneHot();
+            var4b.setIsop();
+            var4b.process();
 
             if (verbose) {
                 std::cerr << "no bisim, ite: " << var1.getNumAnds() << std::endl;
@@ -914,9 +933,11 @@ main(int argc, char* argv[])
                 var1.drewrite();
                 var2.drewrite();
                 var3.drewrite();
+                var4.drewrite();
                 var1b.drewrite();
                 var2b.drewrite();
                 var3b.drewrite();
+                var4b.drewrite();
 
                 if (verbose) {
                     std::cerr << "sizes after drw+drf with ABC:" << std::endl;
@@ -951,9 +972,30 @@ main(int argc, char* argv[])
             auto smallest = var1.getNumAnds();
             smallest = std::min(smallest, var2.getNumAnds());
             smallest = std::min(smallest, var3.getNumAnds());
+            smallest = std::min(smallest, var4.getNumAnds());
             smallest = std::min(smallest, var1b.getNumAnds());
             smallest = std::min(smallest, var2b.getNumAnds());
             smallest = std::min(smallest, var3b.getNumAnds());
+            smallest = std::min(smallest, var4b.getNumAnds());
+
+			// Print the "best" method
+			if (var1.getNumAnds() == smallest) {
+				std::cerr << "-BEST: NO_BISIM NO_ONEHOT NO_ISOP" << std::endl;
+			} else if (var2.getNumAnds() == smallest) {
+				std::cerr << "-BEST: NO_BISIM NO_ONEHOT ISOP" << std::endl;
+			} else if (var3.getNumAnds() == smallest) {
+				std::cerr << "-BEST: NO_BISIM ONEHOT NO_ISOP" << std::endl;
+			} else if (var4.getNumAnds() == smallest) {
+				std::cerr << "-BEST: NO_BISIM ONEHOT ISOP" << std::endl;
+			} else if (var1b.getNumAnds() == smallest) {
+				std::cerr << "-BEST: BISIM NO_ONEHOT NO_ISOP" << std::endl;
+			} else if (var2b.getNumAnds() == smallest) {
+				std::cerr << "-BEST: BISIM NO_ONEHOT ISOP" << std::endl;
+			} else if (var3b.getNumAnds() == smallest) {
+				std::cerr << "-BEST: BISIM ONEHOT NO_ISOP" << std::endl;
+			} else if (var4b.getNumAnds() == smallest) {
+				std::cerr << "-BEST: BISIM ONEHOT ISOP" << std::endl;
+			}
 
             if (options.count("write-binary")) {
                 if (var1.getNumAnds() == smallest) {
@@ -1081,6 +1123,7 @@ main(int argc, char* argv[])
     } else {
         //std::cout << "UNREALIZABLE" << std::endl;
         if (verbose) {
+			std::cerr << "-UNREALIZABLE" << std::endl;
             std::cerr << "\033[1;37mtotal time was " << std::fixed << (wctime() - t_before_parsing) << " sec.\033[m" << std::endl;
         }
         exit(20);
