@@ -95,6 +95,10 @@ def generate_solve_commands_for_file(file_path: str, file_name: str):
 			new_combo = list(knor_arg_combo)
 			new_combo.append(oink_arg)
 			all_arg_combinations.append(tuple(new_combo))
+
+	binary_output = True
+	output_format_arg = "-b" if binary_output else "-a"
+	output_format_extension = ".aig" if binary_output else ".aag"
 	
 	# COMMAND:
 	commands = []
@@ -103,9 +107,9 @@ def generate_solve_commands_for_file(file_path: str, file_name: str):
 		file_arg_text = "".join(arg_combo) # Args used in output filename
 		command_arg_text = " ".join(arg_combo) # Args used in knor command
 
-		output_file = target_folder_path + os.path.splitext(file_name)[0] + ".args" + file_arg_text + ".aag"
+		output_file = target_folder_path + os.path.splitext(file_name)[0] + ".args" + file_arg_text + output_format_extension
 		
-		command = "./{} {} {} -a > {}".format(KNOR_BINARY, file_path, command_arg_text, output_file)
+		command = "./{} {} {} {} > {}".format(KNOR_BINARY, file_path, command_arg_text, output_format_arg, output_file)
 		
 		commands.append((command, arg_combo, str(file_path), output_file))
 	return commands
