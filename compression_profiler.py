@@ -14,6 +14,8 @@ UNMINIMIZED_AIG_FOLDER = "aigs_unminimized"
 MINIMIZED_AIG_FOLDER = "aigs_minimized"
 EHOA_FILES_FOLDER = "examples"
 
+MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 120 # seconds = 2 minutes
+
 def generate_solve_commands_for_file(file_path: str, file_name: str):
 	# These args can be combined
 	# Order does not matter
@@ -149,6 +151,25 @@ def set_is_unrealizable(profiling_data, source_file_path):
 		"commands": []
 	})
 		
+def set_command_had_timeout(profiling_data, cmd, args, input, output):
+	command_data = {
+		"command_used": cmd,
+		"args_used": list(args),
+		"output_file": output,
+		"solve_time": None,
+		"timed_out": True
+	}
+	for source_file in profiling_data["problem_files"]:
+		if source_file["source"] == input:
+			source_file["commands"].append(command_data)
+			return
+	profiling_data["problem_files"].append({
+		"source": input,
+		"realizable": None,
+		"commands": [
+			command_data
+		]
+	})
 
 def insert_command_result_into_profiling_data(data, cmd, args, input, output, time):
 	# Prepare the data to be inserted
@@ -156,13 +177,15 @@ def insert_command_result_into_profiling_data(data, cmd, args, input, output, ti
 		"command_used": cmd,
 		"args_used": list(args),
 		"output_file": output,
-		"solve_time": time
+		"solve_time": time,
+		"timed_out": False
 	}
 
 	# Add if source file entry already exists
 	for source_file in data["problem_files"]:
 		if source_file["source"] == input:
 			source_file["commands"].append(command_data)
+			source_file["realizable"] = True
 			return
 	
 	# Otherwise, need to add the data first, 
@@ -207,14 +230,23 @@ def prepare_non_minimized_aigs():
 	for count, (cmd, args, source, out) in enumerate(commands):
 		if not has_done_command_before(profiling_data, source, args) and not is_known_unrealizable(profiling_data, source):
 			cmd_start = time.time()
-			result = subprocess.run([cmd], shell=True)
+			
+			percentage = (100 * count) / commands_count
+
+			try:
+				result = subprocess.run([cmd], shell=True, timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND)
+			except subprocess.TimeoutExpired as e:
+				set_command_had_timeout(profiling_data, cmd, args, source, out)
+				print("{:.1f}%".format(percentage), "CMD:", count, "/", commands_count, "TIMEOUT: time > ", MAX_TIME_SECONDS_FOR_KNOR_COMMAND)
+				continue
+
 			cmd_end = time.time()
 			diff = cmd_end - cmd_start
 
 			script_now = time.time()
 			script_duration = script_now - script_start
 
-			print("CMD:", count, "/", commands_count, "code", result.returncode, "runtime:", script_duration)
+			print("{:.1f}%".format(percentage), "CMD:", count, "/", commands_count, "code", result.returncode, "runtime:", script_duration)
 			
 			if result.returncode == 10:
 				insert_command_result_into_profiling_data(profiling_data, cmd, args, source, out, diff)
