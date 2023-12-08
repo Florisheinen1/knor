@@ -1,85 +1,203 @@
+from enum import Enum
 import json
-import os
 import itertools
-import pathlib
 import time
 import subprocess
+import re
+from pathlib import Path
 
-ABC_BINARY = "build/_deps/abc-build/abc"
-KNOR_BINARY = "build/knor"
+ABC_BINARY = Path("build/_deps/abc-build/abc")
+ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
+KNOR_BINARY = Path("build/knor")
 
-PROFILING_FILE = "profiler.json"
+PROFILING_FILE = Path("profiler.json")
 
-UNMINIMIZED_AIG_FOLDER = "aigs_unminimized"
-MINIMIZED_AIG_FOLDER = "aigs_minimized"
-EHOA_FILES_FOLDER = "examples"
+UNMINIMIZED_AIG_FOLDER = Path("aigs_unminimized")
+MINIMIZED_AIG_FOLDER = Path("aigs_minimized")
+PROBLEM_FILES_FOLDER = Path("examples")
 
-MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 120 # seconds = 2 minutes
+MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 60 # seconds = 2 minutes
 
-def generate_solve_commands_for_file(file_path: str, file_name: str):
-	# These args can be combined
-	# Order does not matter
-	# No arguments is possibility too
-	knor_args = [
-		"--no-bisim",	# Because adding --bisim is default
-		"--binary",		# Because --onehot is default
-		"--isop",		# Because ITE is default
+PROFILER_SOURCE = Path("profiler.json")
+
+# These args can be combined
+# Order does not matter
+# No arguments is possibility too
+KNOR_ARGS = [
+	"--no-bisim",	# Because adding --bisim is default
+	"--binary",		# Because --onehot is default
+	"--isop",		# Because ITE is default
+	
+	# "--best", 	# To find the combo of --bisim/no-bisim, --isop/ite and --onehot/binary
+	# "--compress" # No use of compress. This will be measured later
+]
+
+# Exactly one arg should be selected at a time
+OINK_SOLVER_ARGS = [
+	"--sym",	# Default
+	# Tangle learning family, aim of research
+	"--tl",		# Recommended
+	"--rtl",	# Recommended
+	# "--ortl",
+	# "--ptl",
+	# "--spptl",
+	# "--dtl",
+	# "--idtl",
+	# Fixpoint algorithm, artrocious behaviour
+	"--fpi",	# Recommended
+	"--fpj",	# Recommended
+	# "--fpjg",
+	# Priority promotion family
+	"--npp",	# Recommended
+	# "--pp",
+	# "--ppp",
+	# "--rr",
+	# "--dp",
+	# "--rrdp",
+	# Zielonka's recursive algorithm
+	# "--zlk",
+	# "--uzlk",
+	# "--zlkq",
+	# "--zlkpp-std",
+	# "--zlkpp-waw",
+	# "--zlkpp-liv",
+	# Strategy improvement
+	# "--psi",
+	# "--ssi",
+	# Progress measures
+	# "--tspm",
+	# "--spm",
+	# "--mspm",
+	# "--sspm",
+	# "--bsspm",
+	# "--qpt",
+	# "--bqpt",
+]
+
+class SolveResult(Enum):
+	TIMED_OUT = 1
+	UNREALIZABLE = 2
+	SOLVED = 3
+	CRASHED = 4
+
+class ProfilerData:
+	def __init__(self, source: Path):
+		self.source: Path = source
+		if source.is_file():
+			with open(source, "r") as file:
+				self.data = json.load(file)
+				print("Loaded profiler data from '{}'".format(source))
+		else:
+			self.data = { "problem_files": [] }
+			print("Created new profiler data")
+			self.save()
+
+	# Saves current data to source file
+	def save(self):
+		with open(self.source, 'w') as file:
+			json.dump(self.data, file, indent=True)
+		print("Saved results in '{}'".format(self.source))
+
+	# Inserts given command result into data
+	def handle_command_result(
+			self,
+			problem_source: Path,
+			args_used: list[str],
+			command_used: str,
+			output_file: Path,
+			solve_time: float,
+			result: SolveResult
+			):
+		for problem_file in self.data["problem_files"]:
+			if problem_file["source"] == str(problem_source):
+				# If we know problem is unrealizable, set it
+				problem_file["known_unrealizable"] |= result == SolveResult.UNREALIZABLE
+				
+				# Check if given solve already happened
+				for attempt in problem_file["solve_attempts"]:
+					if attempt["args_used"] == args_used:
+						attempt["command_used"] = command_used
+						attempt["output_file"] = str(output_file)
+						# We already did this command before
+						if result == SolveResult.SOLVED or result == SolveResult.UNREALIZABLE:
+							attempt["timed_out"] = False
+							attempt["crashed"] = False
+							# Save fastest solve/unrealizable
+							attempt["solve_time"] = min(attempt["solve_time"], solve_time)
+						else: # Crashed or timed out
+							attempt["timed_out"] = result == SolveResult.TIMED_OUT
+							attempt["crashed"] = result == SolveResult.CRASHED
+							# Set solve time to longest we have tried
+							attempt["solve_time"] = max(attempt["solve_time"], solve_time)
+						return
+				# Otherwise, add solve to problem file
+				problem_file["solve_attempts"].append({
+					"args_used": args_used,
+					"output_file": str(output_file),
+					"command_used": command_used,
+					"timed_out": result == SolveResult.TIMED_OUT,
+					"crashed": result == SolveResult.CRASHED,
+					"solve_time": solve_time
+				})
+				return
+		# Otherotherwise, create new probem file with given solve data
+		self.data["problem_files"].append({
+			"source": str(problem_source),
+			"known_unrealizable": result == SolveResult.UNREALIZABLE,
+			"solve_attempts": [
+				{
+					"args_used": args_used,
+					"output_file": str(output_file),
+					"command_used": command_used,
+					"timed_out": result == SolveResult.TIMED_OUT,
+					"crashed": result == SolveResult.CRASHED,
+					"solve_time": solve_time
+				}
+			]
+		})
+
+	# Returns whether running given commmand will give new results
+	def is_new_command(self, problem_source: Path, args: list[str], solve_time: float):
+		for problem_file in self.data["problem_files"]:
+			if problem_file["source"] == str(problem_source):
+				if problem_file["known_unrealizable"]: return False
+				for solve_attempt in problem_file["solve_attempts"]:
+					if solve_attempt["args_used"] == args:
+						# Only try again if not crashed, but timed out with less time than available this time
+						is_new = \
+							not solve_attempt["crashed"] \
+							and solve_attempt["timed_out"] \
+							and solve_attempt["solve_time"] < solve_time
+						return is_new
+				# We have not attempted to solve with given args yet
+				return True
+		# We have not attempted to solve the given problem yet
+		return True
+	
+# Creates knor command that solves the given problem file with given arguments
+# Returns command and target output file
+def create_knor_command(file: Path, args: list[str], output_folder: Path = None) -> tuple[str, Path]:
+	# First, ensure the default output folder if none is specified
+	if not output_folder:
+		if not UNMINIMIZED_AIG_FOLDER.is_dir():
+			UNMINIMIZED_AIG_FOLDER.mkdir()
+
+		output_folder = UNMINIMIZED_AIG_FOLDER / file.name.rstrip("".join(file.suffixes))
 		
-		# "--best", 	# To find the combo of --bisim/no-bisim, --isop/ite and --onehot/binary
-		# "--compress" # No use of compress. This will be measured later
-	]
+		if not output_folder.exists():
+			output_folder.mkdir()
+	# And make sure the output folder exists (whether specified or not)
+	if not output_folder.is_dir():
+		raise FileNotFoundError("Could not find or create output folder: {}".format(output_folder))
+	
+	output_file_name = file.with_stem(file.stem + "_args" + "".join(args)).with_suffix(".aag" if "-a" in args else ".aig").name
+	output_file = output_folder / output_file_name
+	
+	command = "./{} {} {} > {}".format(KNOR_BINARY, file, " ".join(args), output_file)
+	return command, output_file
 
-	# Exactly one arg should be selected at a time
-	oink_solver_args = [
-		"--sym",	# Default
-		# Tangle learning family, aim of research
-		"--tl",		# Recommended
-		"--rtl",	# Recommended
-		"--ortl",
-		"--ptl",
-		"--spptl",
-		"--dtl",
-		"--idtl",
-		# Fixpoint algorithm, artrocious behaviour
-		"--fpi",	# Recommended
-		"--fpj",	# Recommended
-		# "--fpjg",
-		# Priority promotion family
-		"--npp",	# Recommended
-		# "--pp",
-		# "--ppp",
-		# "--rr",
-		# "--dp",
-		# "--rrdp",
-		# Zielonka's recursive algorithm
-		# "--zlk",
-		# "--uzlk",
-		# "--zlkq",
-		# "--zlkpp-std",
-		# "--zlkpp-waw",
-		# "--zlkpp-liv",
-		# Strategy improvement
-		# "--psi",
-		# "--ssi",
-		# Progress measures
-		# "--tspm",
-		# "--spm",
-		# "--mspm",
-		# "--sspm",
-		# "--bsspm",
-		# "--qpt",
-		# "--bqpt",
-	]
-
-	output_args = [
-		"-a",
-		"-b"
-	]
-
-	target_folder_path = UNMINIMIZED_AIG_FOLDER + "/" + os.path.splitext(os.path.splitext(file_name)[0])[0] + "/"
-	if not os.path.isdir(target_folder_path):
-		os.makedirs(target_folder_path)
-
+# Returns a list of all argument combinations to give to Knor
+def create_knor_arguments_combinations(knor_args: list[str], oink_args: list[str], binary_out: bool = True) -> list[list[str]]:
 	# Get all possible combinations of knor args
 	knor_arg_combinations = []
 	for i in range(len(knor_args) + 1):
@@ -90,180 +208,228 @@ def generate_solve_commands_for_file(file_path: str, file_name: str):
 
 	all_arg_combinations = []
 	# Now, combine knor arg combos with every possible oink arg
-	for oink_arg in oink_solver_args:
+	for oink_arg in oink_args:
 		for knor_arg_combo in knor_arg_combinations:
 			new_combo = list(knor_arg_combo)
 			new_combo.append(oink_arg)
-			all_arg_combinations.append(tuple(new_combo))
-
-	binary_output = True
-	output_format_arg = "-b" if binary_output else "-a"
-	output_format_extension = ".aig" if binary_output else ".aag"
+			new_combo.append("-b" if binary_out else "-a")
+			all_arg_combinations.append(new_combo)
 	
-	# COMMAND:
-	commands = []
-	# ./knor ../examples/amba_decomposed_arbiter_10.tlsf.ehoa --bisim --onehot --compress -a -v > controller.aag
-	for arg_combo in all_arg_combinations:
-		file_arg_text = "".join(arg_combo) # Args used in output filename
-		command_arg_text = " ".join(arg_combo) # Args used in knor command
+	return all_arg_combinations
 
-		output_file = target_folder_path + os.path.splitext(file_name)[0] + ".args" + file_arg_text + output_format_extension
-		
-		command = "./{} {} {} {} > {}".format(KNOR_BINARY, file_path, command_arg_text, output_format_arg, output_file)
-		
-		commands.append((command, arg_combo, str(file_path), output_file))
-	return commands
-
-def load_profiling_stats_file():
-	try:
-		with open(PROFILING_FILE, "r") as file:
-			data = json.load(file)
-			return data
-	except FileNotFoundError as e:
-		# Then create the file first
-		data = {
-			"problem_files": []
-		}
-		return data
+# Returns list of problem files in the PROBLEM_FILES_FOLDER
+# Optional: regex to only select matching file names
+def get_problem_files(regex: str = None) -> list[Path]:
+	problem_file_list = []
 	
-def store_profiling_stats_file(data):
-	with open(PROFILING_FILE, 'w') as file:
-		json.dump(data, file, indent=True)
-
-def has_done_command_before(profiling_data, source_file_path, args):
-	for source_file in profiling_data["problem_files"]:
-		if source_file["source"] == source_file_path:
-			for command in source_file["commands"]:
-				if command["args_used"] == list(args):
-					return True
-	return False
-
-def is_known_unrealizable(profiling_data, source_file_path):
-	for source_file in profiling_data["problem_files"]:
-		if source_file["source"] == source_file_path and not source_file["realizable"]:
-			return True
-	return False
-
-def set_is_unrealizable(profiling_data, source_file_path):
-	for source_file in profiling_data["problem_files"]:
-		if source_file["source"] == source_file_path:
-			source_file["realizable"] = False
-			return
-	profiling_data["problem_files"].append({
-		"source": source_file_path,
-		"realizable": False,
-		"commands": []
-	})
-		
-def set_command_had_timeout(profiling_data, cmd, args, input, output):
-	command_data = {
-		"command_used": cmd,
-		"args_used": list(args),
-		"output_file": output,
-		"solve_time": None,
-		"timed_out": True
-	}
-	for source_file in profiling_data["problem_files"]:
-		if source_file["source"] == input:
-			source_file["commands"].append(command_data)
-			return
-	profiling_data["problem_files"].append({
-		"source": input,
-		"realizable": None,
-		"commands": [
-			command_data
-		]
-	})
-
-def insert_command_result_into_profiling_data(data, cmd, args, input, output, time):
-	# Prepare the data to be inserted
-	command_data = {
-		"command_used": cmd,
-		"args_used": list(args),
-		"output_file": output,
-		"solve_time": time,
-		"timed_out": False
-	}
-
-	# Add if source file entry already exists
-	for source_file in data["problem_files"]:
-		if source_file["source"] == input:
-			source_file["commands"].append(command_data)
-			source_file["realizable"] = True
-			return
-	
-	# Otherwise, need to add the data first, 
-	data["problem_files"].append({
-		"source": input,
-		"realizable": True,
-		"commands": [
-			command_data
-		]
-	})
-
-def prepare_non_minimized_aigs():
-	# First, ensure unminimized folder exists
-	pathlib.Path(UNMINIMIZED_AIG_FOLDER).mkdir(parents=True, exist_ok=True)
-
-	# List all EHOA files in examples folder
-	ehoa_files_list = []
-	for item in pathlib.Path(EHOA_FILES_FOLDER).iterdir():
+	for item in Path(PROBLEM_FILES_FOLDER).iterdir():
 		if item.is_file():
-			ehoa_files_list.append((item, item.name))
+			if regex:
+				if re.match(regex, item.name):
+					problem_file_list.append(item)
+			else:
+				problem_file_list.append(item)
+	return problem_file_list
 
-	ehoa_file_count = len(ehoa_files_list)
-	print("Found", ehoa_file_count, "ehoa files")
+# Solves the given problem files with the given argument combinations and stores stats in given profiling data
+def solve_problem_files(files: list[Path], arg_combinations: list[list[str]], profiler_data: ProfilerData, timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND):
+	total_commands = len(files) * len(arg_combinations)
+	
+	for file_num, file in enumerate(files):
+		for arg_combo_num, arg_combo in enumerate(arg_combinations):
+			progress_percentage = (file_num * len(arg_combinations) + arg_combo_num) / total_commands * 100
+			print("{:.1f}% (File: {}/{}, arg: {}/{})... ".format(progress_percentage, file_num, len(files), arg_combo_num, len(arg_combinations)), end="", flush=True)
 
-	# Get all command combinations of arguments
-	commands = []
-	for ehoa_file_item in ehoa_files_list:
-		target_path, target_name = ehoa_file_item
-
-		file_commands = generate_solve_commands_for_file(target_path, target_name)
-		commands.extend(file_commands)
-
-	commands_count = len(commands)
-
-	print("Created:", commands_count, "commands")
-
-	profiling_data = load_profiling_stats_file()
-
-	script_start = time.time()
-
-	# For every command we created
-	for count, (cmd, args, source, out) in enumerate(commands):
-		if not has_done_command_before(profiling_data, source, args) and not is_known_unrealizable(profiling_data, source):
-			cmd_start = time.time()
-			
-			percentage = (100 * count) / commands_count
-
-			try:
-				result = subprocess.run([cmd], shell=True, timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND)
-			except subprocess.TimeoutExpired as e:
-				set_command_had_timeout(profiling_data, cmd, args, source, out)
-				print("{:.1f}%".format(percentage), "CMD:", count, "/", commands_count, "TIMEOUT: time > ", MAX_TIME_SECONDS_FOR_KNOR_COMMAND)
+			if not profiler_data.is_new_command(file, arg_combo, timeout):
+				print("Already computed. Skipping...")
 				continue
 
-			cmd_end = time.time()
-			diff = cmd_end - cmd_start
+			command, output_file = create_knor_command(file, arg_combo)
 
-			script_now = time.time()
-			script_duration = script_now - script_start
+			command_start = time.time()
+			try:
+				result = run_shell_command(command, timeout)
+			except KeyboardInterrupt:
+				print("Aborted after: {:.2f}s".format(time.time() - command_start))
+				return
+			command_time = time.time() - command_start
 
-			print("{:.1f}%".format(percentage), "CMD:", count, "/", commands_count, "code", result.returncode, "runtime:", script_duration)
-			
-			if result.returncode == 10:
-				insert_command_result_into_profiling_data(profiling_data, cmd, args, source, out, diff)
-				store_profiling_stats_file(profiling_data)
+			solve_result = SolveResult.SOLVED
+			if not result:
+				print("Timed out in: {:.2f}s".format(command_time))
+				solve_result = SolveResult.TIMED_OUT
+			elif result.returncode == 10:
+				print("Solved in: {:.2f}s".format(command_time))
 			elif result.returncode == 20:
-				# This problem is not realizable. Set that in the profiler data
-				set_is_unrealizable(profiling_data, source)
-				store_profiling_stats_file(profiling_data)
-				print("Problem " + source + " is unrealizable")
+				print("Unrealizable in: {:.2f}s".format(command_time))
+				solve_result = SolveResult.UNREALIZABLE
 			else:
-				print("Failed to execute command: '" + cmd + "'")
+				print("Crashed in: {:.2f}s".format(command_time))
+				solve_result = SolveResult.CRASHED
+			
+			profiler_data.handle_command_result(
+				file,
+				arg_combo,
+				command,
+				output_file,
+				command_time,
+				solve_result
+			)
+
+# Runs the given shell command in terminal
+def run_shell_command(cmd, timeout):
+	try:
+		return subprocess.run([cmd], shell=True, timeout=timeout, stdout=subprocess.PIPE)
+	except subprocess.TimeoutExpired as e:
+		return None
 
 
+
+
+
+
+
+
+
+
+
+# Runs ABC 'read' and 'print_stats' command on fiven file and returns the parsed stats
+def get_aig_stats_from_file(file):
+	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
+	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.decode().replace(" ","")
+	and_gates = int(re.findall("and=[0-9]*", cmd_output)[0].split("=")[1])
+	latches = int(re.findall("lat=[0-9]*", cmd_output)[0].split("=")[1])
+	levels = int(re.findall("lev=[0-9]*", cmd_output)[0].split("=")[1])
+	inputs, outputs = map(int, re.findall("i/o=[0-9]*/[0-9]*",cmd_output)[0].split("=")[1].split("/"))
+	
+	return {
+		"and_gates": and_gates,
+		"levels": levels,
+		"latches": latches,
+		"inputs": inputs,
+		"outputs": outputs
+	}
+
+# Will create a solution for every possible example problem file. This takes looong...
+def solve_all_problem_files():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	problem_files = get_problem_files()
+	arg_combos = create_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+	solve_problem_files(problem_files, arg_combos, profiler)
+	profiler.save()
+
+# Solves all arbiter problems
+def solve_all_arbiter_problem_files():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	problem_files = get_problem_files(".*arbiter.*")
+	arg_combos = create_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+	solve_problem_files(problem_files, arg_combos, profiler)
+	profiler.save()
+
+
+
+def generate_compile_commands_for_aigs(profiler_data):
+	# ./abc -c "r i10.aig; b; ps; b; rw -l; rw -lz; b; rw -lz; b; ps; cec"
+	commands = {
+		"compress": "b -l; rw -l; rwz -l; b -l; rwz -l; b -l",
+		"compress2": "b -l; rw -l; rf -l; b -l; rw -l; rwz -l; b -l; rfz -l; rwz -l; b -l",
+		"compress2rs":
+		"""
+			b -l;
+			rs -K 6 -l;
+			rw -l;
+			rs -K 6 -N 2 -l;
+			rf -l;
+			rs -K 8 -l;
+			b -l;
+			rs -K 8 -N 2 -l;
+			rw -l; rs -K 10 -l;
+			rwz -l;
+			rs -K 10 -N 2 -l;
+			b -l;
+			rs -K 12 -l;
+			rfz -l;
+			rs -K 12 -N 2 -l;
+			rwz -l;
+			b -l
+		"""
+	}
+
+	filename = UNMINIMIZED_AIG_FOLDER + "aigs_unminimized/arbiter_with_buffer/arbiter_with_buffer.tlsf.args--tl.aig"
+	
+	source_command = "source " + ABC_ALIAS_SOURCE + ""
+	args = source_command + "; r " + filename + "; &topand"
+
+	cmd = ABC_BINARY + " -c '" + args + "'"
+
+
+	arg_possibilites = [
+		"b -l",
+		"rw -l",
+		"rwz -l",
+		"rf -l",
+		"rfz -l",
+		"rs -K 6 -l",
+		"rs -K 6 -N 2 -l",
+		"rs -K 8 -l",
+		"rs -K 8 -N 2 -l",
+		"rs -K 10 -l",
+		"rs -K 10 -N 2 -l",
+		"rs -K 12 -l",
+		"rs -K 12 -N 2 -l",
+	]
+
+	result = run_shell_command(cmd, 20)
+
+	pass
+
+def permutate_BFS(options, length):
+	import copy
+	all_permutations = []
+
+	# Initialize first set of permutations, which is just the options, each in a single element list
+	permutations_of_previous_length: list[list[str]] = list(map(list, options))
+	all_permutations.extend(permutations_of_previous_length)
+
+	i = 1
+	while i < length:
+		permutations_of_current_length = []
+
+		for permutation_of_previous_length in permutations_of_previous_length:
+
+			for option in options:
+				new_permutation = [x for x in permutation_of_previous_length] + [option]
+				permutations_of_current_length.append(new_permutation)
+		
+		all_permutations.extend(permutations_of_current_length)
+		permutations_of_previous_length = permutations_of_current_length
+		i += 1
+	
+	return all_permutations
+	
+""" A B C
+A
+B
+C
+
+A A
+A B
+A C
+
+B A
+B B
+B C
+C A
+C B
+C C
+A A A
+A A B
+A A C
+A B A
+A B B
+A B C
+A B 
+"""
 
 if __name__ == "__main__":
-	prepare_non_minimized_aigs()
+	solve_all_arbiter_problem_files()
