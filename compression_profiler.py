@@ -276,25 +276,37 @@ def solve_problem_files(files: list[Path], arg_combinations: list[list[str]], pr
 				solve_result
 			)
 
-# Runs the given shell command in terminal
-def run_shell_command(cmd, timeout):
+# Runs the given shell command in terminal, timeout in seconds
+def run_shell_command(cmd: str, timeout: float):
 	try:
 		return subprocess.run([cmd], shell=True, timeout=timeout, stdout=subprocess.PIPE)
 	except subprocess.TimeoutExpired as e:
 		return None
 
-
-
-
-
-
-
-
-
-
+# Reads all AIG output files in profiler and adds the read data to the profiler
+def add_aig_stats_to_profiler(profiler: ProfilerData):
+	problem_files_count = len(profiler.data["problem_files"])
+	for count, problem_file in enumerate(profiler.data["problem_files"]):
+		percentage = count / problem_files_count * 100
+		print("{:.2f}% Reading solutions of problem {}/{}... ".format(percentage, count, problem_files_count), flush=True, end="")
+		read_solution_counter = 0
+		start_time = time.time()
+		if not problem_file["known_unrealizable"]:
+			for solve_attempt in problem_file["solve_attempts"]:
+				if not solve_attempt["timed_out"] and not solve_attempt["crashed"]:
+					# This solve attempt was successful
+					if solve_attempt["data"]: continue # Data already calculated
+					solution_file = Path(solve_attempt["output_file"])
+					aig_stats = get_aig_stats_from_file(solution_file)
+					solve_attempt["data"] = aig_stats
+					read_solution_counter += 1
+			read_time = time.time() - start_time
+			print("Read {} solutions in {:.2f}s".format(read_solution_counter, read_time))
+		else: print("Unrealizable, no solutions.")
+	profiler.save()
 
 # Runs ABC 'read' and 'print_stats' command on fiven file and returns the parsed stats
-def get_aig_stats_from_file(file):
+def get_aig_stats_from_file(file: Path):
 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
 	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.decode().replace(" ","")
 	and_gates = int(re.findall("and=[0-9]*", cmd_output)[0].split("=")[1])
@@ -433,3 +445,4 @@ A B
 
 if __name__ == "__main__":
 	solve_all_arbiter_problem_files()
+	add_aig_stats_to_profiler(ProfilerData(Path("profiler.json")))
