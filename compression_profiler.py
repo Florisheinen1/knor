@@ -17,6 +17,7 @@ MINIMIZED_AIG_FOLDER = Path("aigs_minimized")
 PROBLEM_FILES_FOLDER = Path("examples")
 
 MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 60 # seconds = 2 minutes
+MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND = 60 # seconds = 2 minutes
 
 PROFILER_SOURCE = Path("profiler.json")
 
@@ -74,6 +75,22 @@ OINK_SOLVER_ARGS = [
 	# "--bqpt",
 ]
 
+ABC_OPTIMIZATION_ARGUMENTS = [
+	"b -l",
+	"rw -l",
+	"rwz -l",
+	"rf -l",
+	"rfz -l",
+	# "rs -K 6 -l",
+	# "rs -K 6 -N 2 -l",
+	# "rs -K 8 -l",
+	# "rs -K 8 -N 2 -l",
+	# "rs -K 10 -l",
+	# "rs -K 10 -N 2 -l",
+	# "rs -K 12 -l",
+	# "rs -K 12 -N 2 -l",
+]
+
 class SolveResult(Enum):
 	TIMED_OUT = 1
 	UNREALIZABLE = 2
@@ -95,7 +112,7 @@ class ProfilerData:
 	# Saves current data to source file
 	def save(self):
 		with open(self.source, 'w') as file:
-			json.dump(self.data, file, indent=True)
+			json.dump(self.data, file, indent=3)
 		print("Saved results in '{}'".format(self.source))
 
 	# Inserts given command result into data
@@ -219,7 +236,7 @@ def create_knor_arguments_combinations(knor_args: list[str], oink_args: list[str
 
 # Returns list of problem files in the PROBLEM_FILES_FOLDER
 # Optional: regex to only select matching file names
-def get_problem_files(regex: str = None) -> list[Path]:
+def get_problem_files(regex: str=None) -> list[Path]:
 	problem_file_list = []
 	
 	for item in Path(PROBLEM_FILES_FOLDER).iterdir():
@@ -284,18 +301,18 @@ def run_shell_command(cmd: str, timeout: float):
 		return None
 
 # Reads all AIG output files in profiler and adds the read data to the profiler
-def add_aig_stats_to_profiler(profiler: ProfilerData):
+def add_aig_stats_to_profiler(profiler: ProfilerData, reread: bool=False):
 	problem_files_count = len(profiler.data["problem_files"])
 	for count, problem_file in enumerate(profiler.data["problem_files"]):
 		percentage = count / problem_files_count * 100
-		print("{:.2f}% Reading solutions of problem {}/{}... ".format(percentage, count, problem_files_count), flush=True, end="")
+		print("{:.2f}% Reading solutions of problem {}/{}... ".format(percentage, count + 1, problem_files_count), flush=True, end="")
 		read_solution_counter = 0
 		start_time = time.time()
 		if not problem_file["known_unrealizable"]:
 			for solve_attempt in problem_file["solve_attempts"]:
 				if not solve_attempt["timed_out"] and not solve_attempt["crashed"]:
 					# This solve attempt was successful
-					if solve_attempt["data"]: continue # Data already calculated
+					if "data" in solve_attempt and not reread: continue # Data already calculated
 					solution_file = Path(solve_attempt["output_file"])
 					aig_stats = get_aig_stats_from_file(solution_file)
 					solve_attempt["data"] = aig_stats
@@ -305,22 +322,37 @@ def add_aig_stats_to_profiler(profiler: ProfilerData):
 		else: print("Unrealizable, no solutions.")
 	profiler.save()
 
+# Parses the output of a shell command and looks for the first ABC 'print_stats' output to parse
+def parse_aig_read_stats_output(cmd_output: str) -> dict:
+	sanitized_output = cmd_output.replace(" ","")
+	try:
+		and_gates = int(re.findall("and=[0-9]*", sanitized_output)[0].split("=")[1])
+		latches = int(re.findall("lat=[0-9]*", sanitized_output)[0].split("=")[1])
+		levels = int(re.findall("lev=[0-9]*", sanitized_output)[0].split("=")[1])
+		inputs, outputs = map(int, re.findall("i/o=[0-9]*/[0-9]*",sanitized_output)[0].split("=")[1].split("/"))
+		
+		return {
+			"and_gates": and_gates,
+			"levels": levels,
+			"latches": latches,
+			"inputs": inputs,
+			"outputs": outputs
+		}
+	except:
+		print("Failed to parse: \n\n{}".format(sanitized_output))
+
 # Runs ABC 'read' and 'print_stats' command on fiven file and returns the parsed stats
 def get_aig_stats_from_file(file: Path):
 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
-	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.decode().replace(" ","")
-	and_gates = int(re.findall("and=[0-9]*", cmd_output)[0].split("=")[1])
-	latches = int(re.findall("lat=[0-9]*", cmd_output)[0].split("=")[1])
-	levels = int(re.findall("lev=[0-9]*", cmd_output)[0].split("=")[1])
-	inputs, outputs = map(int, re.findall("i/o=[0-9]*/[0-9]*",cmd_output)[0].split("=")[1].split("/"))
-	
-	return {
-		"and_gates": and_gates,
-		"levels": levels,
-		"latches": latches,
-		"inputs": inputs,
-		"outputs": outputs
-	}
+	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.decode()
+	return parse_aig_read_stats_output(cmd_output)
+
+# Will append the given comment to any AIG file
+def write_comment_to_aig_file(aig_file: Path, comment: str):
+	with open(aig_file, "a") as file:
+		file.write("c\n")
+		file.write(comment)
+		file.write("\n")
 
 # Will create a solution for every possible example problem file. This takes looong...
 def solve_all_problem_files():
@@ -339,110 +371,201 @@ def solve_all_arbiter_problem_files():
 	profiler.save()
 
 
-
-def generate_compile_commands_for_aigs(profiler_data):
-	# ./abc -c "r i10.aig; b; ps; b; rw -l; rw -lz; b; rw -lz; b; ps; cec"
-	commands = {
-		"compress": "b -l; rw -l; rwz -l; b -l; rwz -l; b -l",
-		"compress2": "b -l; rw -l; rf -l; b -l; rw -l; rwz -l; b -l; rfz -l; rwz -l; b -l",
-		"compress2rs":
-		"""
-			b -l;
-			rs -K 6 -l;
-			rw -l;
-			rs -K 6 -N 2 -l;
-			rf -l;
-			rs -K 8 -l;
-			b -l;
-			rs -K 8 -N 2 -l;
-			rw -l; rs -K 10 -l;
-			rwz -l;
-			rs -K 10 -N 2 -l;
-			b -l;
-			rs -K 12 -l;
-			rfz -l;
-			rs -K 12 -N 2 -l;
-			rwz -l;
-			b -l
-		"""
-	}
-
-	filename = UNMINIMIZED_AIG_FOLDER + "aigs_unminimized/arbiter_with_buffer/arbiter_with_buffer.tlsf.args--tl.aig"
+# Creates an ABC optimization command that will optimize the given AIG file and writes to an output file
+def create_abc_optimization_command(
+		source_file: Path,
+		optimization_arguments: list[str],
+		optimize_id: int,
+		solution_folder: Path) -> tuple[str, Path]:
 	
-	source_command = "source " + ABC_ALIAS_SOURCE + ""
-	args = source_command + "; r " + filename + "; &topand"
+	output_file = solution_folder / "m{}.aig".format(optimize_id)
 
-	cmd = ABC_BINARY + " -c '" + args + "'"
-
-
-	arg_possibilites = [
-		"b -l",
-		"rw -l",
-		"rwz -l",
-		"rf -l",
-		"rfz -l",
-		"rs -K 6 -l",
-		"rs -K 6 -N 2 -l",
-		"rs -K 8 -l",
-		"rs -K 8 -N 2 -l",
-		"rs -K 10 -l",
-		"rs -K 10 -N 2 -l",
-		"rs -K 12 -l",
-		"rs -K 12 -N 2 -l",
+	all_arguments = [
+		"read {}".format(source_file)			# Read the source file
+	] + optimization_arguments + [				# Apply optimizations
+		"time",									# Print time it took to optimize
+		"write_aiger {}".format(output_file),	# Write to output file
+		"print_stats"							# Print stats of optimized file
 	]
 
-	result = run_shell_command(cmd, 20)
+	arguments_string = "; ".join(all_arguments)
+	command = "./{} -c '{}'".format(ABC_BINARY, arguments_string)
+	return command, output_file
 
-	pass
+# Prepares profiler data structure and returns first new optimization ID
+def prepare_solution_optimizations(solution_data: dict, abc_args: list[str], output_folder: Path) -> int:
+	if not "optimizations" in solution_data: solution_data["optimizations"] = []
 
-def permutate_BFS(options, length):
-	import copy
-	all_permutations = []
+	# Get highest optimization id
+	highest_optimization_id = 0
+	for optimization in solution_data["optimizations"]:
+		if optimization["id"] > highest_optimization_id:
+			highest_optimization_id = optimization["id"]
+	# Increment for next optimization
+	new_optimization_id = highest_optimization_id + 1
 
-	# Initialize first set of permutations, which is just the options, each in a single element list
-	permutations_of_previous_length: list[list[str]] = list(map(list, options))
-	all_permutations.extend(permutations_of_previous_length)
-
-	i = 1
-	while i < length:
-		permutations_of_current_length = []
-
-		for permutation_of_previous_length in permutations_of_previous_length:
-
-			for option in options:
-				new_permutation = [x for x in permutation_of_previous_length] + [option]
-				permutations_of_current_length.append(new_permutation)
+	# Make sure all single optimization arguments have been executed
+	for abc_arg in abc_args:
+		single_abc_arg_in_optimizations = False
+		for optimization in solution_data["optimizations"]:
+			if optimization["args_used"] == [abc_arg]:
+				single_abc_arg_in_optimizations = True
+				break
 		
-		all_permutations.extend(permutations_of_current_length)
-		permutations_of_previous_length = permutations_of_current_length
-		i += 1
+		if not single_abc_arg_in_optimizations:
+			# Then we create it
+			command, output_file = create_abc_optimization_command(
+				solution_data["output_file"],
+				[abc_arg],
+				new_optimization_id,
+				output_folder)
+			
+			optimize_start = time.time()
+			result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND)
+			optimize_time = time.time() - optimize_start
+			
+			optimized_data = parse_aig_read_stats_output(result.stdout.decode())
+
+			solution_data["optimizations"].append({
+				"command_used": command,
+				"output_file": str(output_file),
+				"args_used": [abc_arg],
+				"compress_time_python": optimize_time,
+				"actual_compress_time": None,
+				"timed_out": optimized_data == None,
+				"data": optimized_data,
+				"id": new_optimization_id
+			})
+			
+			new_optimization_id += 1
+
+			write_comment_to_aig_file(output_file, "This file was optimized with the following ABC arguments:\n{}".format(", ".join([abc_arg])))
+			
+	return new_optimization_id
+			
+def get_optimizations_of_depth(solution: dict, depth: int) -> list[dict]:
+	optimizations = []
+	for optimization in solution["optimizations"]:
+		if len(optimization["args_used"]) == depth:
+			optimizations.append(optimization)
+	return optimizations
+
+def branch_off_optimizations(solution: dict, abc_args: list[str], output_folder: Path, next_id: int):
+	# Now iterate over compression methods
+	progress_made = True
+	optimize_depth = 1
+	while progress_made:
+		progress_made = False
+
+		total_best_gain = 1
+
+		branch_depth_start = time.time()
+		for optimization in get_optimizations_of_depth(solution, optimize_depth):
+			previous_optimize_args = optimization["args_used"]
+			previous_AND_gate_count = optimization["data"]["and_gates"]
+			min_AND_gate_gain = 1
+
+			for abc_arg in abc_args:
+				new_optimize_args = previous_optimize_args + [abc_arg]
+
+				# Check if this has already been calculated
+				is_calculated = False
+				for opt in solution["optimizations"]:
+					if opt["args_used"] == new_optimize_args:
+						is_calculated = True
+				if is_calculated: continue
+
+				command, output_file = create_abc_optimization_command(optimization["output_file"], [abc_arg], next_id, output_folder)
+
+				optimize_start = time.time()
+				result = run_shell_command(command, 60)
+				optimize_time = time.time() - optimize_start
+
+				output_data = None
+				if result != None:
+					output_data = parse_aig_read_stats_output(result.stdout.decode())
+
+				solution["optimizations"].append({
+					"command_used": command,
+					"output_file": str(output_file),
+					"args_used": new_optimize_args,
+					"compress_time_python": optimize_time,
+					"actual_compress_time": None,
+					"timed_out": output_data == None,
+					"data": output_data,
+					"id": next_id
+				})
+
+				gain = output_data["and_gates"] / previous_AND_gate_count
+				min_AND_gate_gain = min(min_AND_gate_gain, gain)
+
+				write_comment_to_aig_file(output_file, "This file was optimized with the following ABC arguments:\n{}".format(", ".join(new_optimize_args)))
+
+				next_id += 1
+
+			if min_AND_gate_gain < 0.99:
+				# There has been an optimization of more than 1%
+				progress_made = True
+			total_best_gain = min(total_best_gain, min_AND_gate_gain)
+		
+		
+		branch_depth_time = time.time() - branch_depth_start
+		print("Branched depth level: {} in {:.2f} seconds with gain: {}".format(optimize_depth, branch_depth_time, total_best_gain))
+
+		optimize_depth += 1
+		# progress_made = False
+		if optimize_depth > 4:
+			progress_made = False
+
+def try_minimization_methods(profiler: ProfilerData, abc_args: list[str]):
+	if not MINIMIZED_AIG_FOLDER.is_dir():
+		MINIMIZED_AIG_FOLDER.mkdir()
 	
-	return all_permutations
+	for problem_file in profiler.data["problem_files"]:
+		# If unrealizable, there can be no minimization
+		if problem_file["known_unrealizable"]: continue
+
+		problem_file_source = Path(problem_file["source"])
+		problem_folder = MINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
+
+		if not problem_folder.is_dir(): problem_folder.mkdir()
+
+		for solve_attempt in problem_file["solve_attempts"]:
+			if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
+
+			args_used: list[str] = solve_attempt["args_used"]
+			solution_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), args_used))
+			if not solution_folder.is_dir(): solution_folder.mkdir()
+
+			new_highest_id = prepare_solution_optimizations(solve_attempt, abc_args, solution_folder)
+
+			branch_start = time.time()
+			branch_off_optimizations(solve_attempt, abc_args, solution_folder, new_highest_id)
+			branch_time = time.time() - branch_start
+			print("Branched for solution {} in {:.2f}s".format(args_used, branch_time))
+			profiler.save()
+
+
+	profiler.save()
+
+
+def test1():
+	p = ProfilerData(Path("profiler.json"))
+	try:
+		try_minimization_methods(p, ABC_OPTIMIZATION_ARGUMENTS[0:2])
+	except KeyboardInterrupt:
+		print("Aborted by user")
+	p.save()
 	
-""" A B C
-A
-B
-C
+def test2():
+	p = ProfilerData(Path("profiler.json"))
+	try:
+		try_minimization_methods(p, ABC_OPTIMIZATION_ARGUMENTS)
+	except KeyboardInterrupt:
+		print("Aborted by user")
+	p.save()
 
-A A
-A B
-A C
-
-B A
-B B
-B C
-C A
-C B
-C C
-A A A
-A A B
-A A C
-A B A
-A B B
-A B C
-A B 
-"""
-
-if __name__ == "__main__":
-	solve_all_arbiter_problem_files()
-	add_aig_stats_to_profiler(ProfilerData(Path("profiler.json")))
+# if __name__ == "__main__":
+	# solve_all_arbiter_problem_files()
+	# add_aig_stats_to_profiler(ProfilerData(Path("profiler.json")), True)
+	# try_minimization_methods(ProfilerData(Path("profiler.json")))
