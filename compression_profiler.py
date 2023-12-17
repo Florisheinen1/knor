@@ -555,7 +555,7 @@ def create_abc_optimization_command(
 # 	profiler.save()
 
 # Goes through existing optimizations to see if the wanted optimization can continue from the existing one
-def find_best_subset_optimization(solution: dict, wanted_args: list[str]) -> dict | None:
+def find_best_subset_optimization(solution: dict, wanted_args: list[str]) -> dict | None:	
 	most_similar_optimization = None
 
 	for optimization in solution["optimizations"]:
@@ -563,17 +563,22 @@ def find_best_subset_optimization(solution: dict, wanted_args: list[str]) -> dic
 		# If more used args then wanted, this optimization is of no use
 		if len(used_args) > len(wanted_args): continue
 		
+		found_inconsistency = False
 		for i in range(len(used_args)):
 			# If we encounter different argument, this optimization is not a subset
-			if wanted_args[i] != used_args[i]: break
+			if wanted_args[i] != used_args[i]:
+				found_inconsistency = True
+				break
 
 		# If we looped through entire used_args, this optimization is a subset
-		if i + 1 == len(used_args):
-			if not most_similar_optimization or i + 1 > len(most_similar_optimization["args_used"]):
+		if not found_inconsistency:
+			# If we do not have one yet, set it
+			if not most_similar_optimization: most_similar_optimization = optimization
+			# If we looped through all wanted args as well, this is exactly the same optimization
+			elif len(used_args) > len(most_similar_optimization["args_used"]):
 				most_similar_optimization = optimization
 
 				if used_args == wanted_args: break
-
 	return most_similar_optimization
 
 # Returns a list of arguments used for checking if duplicate sequential arguments have positive effect
@@ -607,39 +612,28 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 
 	arguments_build_up = []
 
-	print("Wanting to do arguments: {}".format(arguments))
-
-	# print("[", end="", flush=True)
+	print("[", end="", flush=True)
 	for argument in arguments:
 		arguments_build_up.append(argument)
-		print(" - Argument: {}, built up from {}".format(argument, arguments_build_up))
 
-		closest_base = find_best_subset_optimization(solution, arguments)
+		closest_base = find_best_subset_optimization(solution, arguments_build_up)
 
 		source_file = None
 
-		if closest_base: print(" - Closest base has args: {}".format(closest_base["args_used"]))
-		else: print(" - No closest base found")
-
 		if closest_base:
-			if closest_base["args_used"] == arguments:
+			if closest_base["args_used"] == arguments_build_up:
 				# If we already calculated this, continue to next arguments
-				# print("*", end="", flush=True)
-				print(" - Found already existing optimization!")
+				print("*", end="", flush=True)
 				continue
 			# Otherwise, branch off closest optimization
 			source_file = closest_base["output_file"]
-			print(" - Continuing further on existing boi")
-			# print("a", end="", flush=True)
+			print("a", end="", flush=True)
 		else:
 			# Then we need to branch off of the original solution
 			source_file = solution["output_file"]
-			print(" - Creating new argument set")
-			# print("o", end="", flush=True)
+			print("o", end="", flush=True)
 
 		command, output_file = create_abc_optimization_command(source_file, [argument], new_optimization_id, output_folder)
-
-		print(" - Command: {}".format(command))
 
 		optimize_start = time.time()
 		result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND)
@@ -647,13 +641,13 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 		
 		stats = None
 		if result:
-			output = result.stdout.decode()
+			output = result.stdout.read().decode()
 			stats = parse_aig_read_stats_output(output)
 
 		solution["optimizations"].append({
 			"command_used": command,
 			"output_file": str(output_file),
-			"args_used": arguments_build_up,
+			"args_used": arguments_build_up.copy(),
 			"optimize_time_python": optimize_time,
 			"actual_optimize_time": None,
 			"timed_out": result == None,
@@ -662,8 +656,8 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 		})
 
 		new_optimization_id += 1
-	# print("]", flush=True)
-	input("Press enter to continue...")
+	
+	print("]", flush=True)
 
 # Will optimize all solutions (that match regex) with each given optimization
 def execute_optimizations(profiler: ProfilerData, optimizations: list[list[str]], problem_regex: str = None):
