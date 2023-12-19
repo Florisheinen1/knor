@@ -7,19 +7,23 @@ import re
 from pathlib import Path
 import os
 import signal
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 ABC_BINARY = Path("build/_deps/abc-build/abc")
 ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
 KNOR_BINARY = Path("build/knor")
-
-PROFILING_FILE = Path("profiler.json")
 
 UNMINIMIZED_AIG_FOLDER = Path("aigs_unminimized")
 MINIMIZED_AIG_FOLDER = Path("aigs_minimized")
 PROBLEM_FILES_FOLDER = Path("examples")
 
 MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 30 # seconds
-MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND = 60 # seconds
+MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND = 120 # seconds
+
+REPETITION_TEST_MAX_REPETITION = 5
 
 PROFILER_SOURCE = Path("profiler.json")
 
@@ -113,6 +117,7 @@ class ProfilerData:
 
 	# Saves current data to source file
 	def save(self):
+		print("Saving profiler data. Do not quit... ", end="", flush=True)
 		with open(self.source, 'w') as file:
 			json.dump(self.data, file, indent=3)
 		print("Saved results in '{}'".format(self.source))
@@ -326,7 +331,6 @@ def add_aig_stats_to_profiler(profiler: ProfilerData, reread: bool=False):
 			read_time = time.time() - start_time
 			print("Read {} solutions in {:.2f}s".format(read_solution_counter, read_time))
 		else: print("Unrealizable, no solutions.")
-	profiler.save()
 
 # Parses the output of a shell command and looks for the first ABC 'print_stats' output to parse
 def parse_aig_read_stats_output(cmd_output: str) -> dict:
@@ -350,7 +354,7 @@ def parse_aig_read_stats_output(cmd_output: str) -> dict:
 # Runs ABC 'read' and 'print_stats' command on fiven file and returns the parsed stats
 def get_aig_stats_from_file(file: Path):
 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
-	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.decode()
+	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.read().decode()
 	return parse_aig_read_stats_output(cmd_output)
 
 # Will append the given comment to any AIG file
@@ -618,6 +622,17 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 
 		closest_base = find_best_subset_optimization(solution, arguments_build_up)
 
+		redo_previous_try = False
+
+		if closest_base and closest_base["timed_out"]:
+			# Best base timed out, so we either try again or skip this one
+			if closest_base["optimize_time_python"] < MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND:
+				# We can try again
+				closest_base = find_best_subset_optimization(solution, arguments_build_up[:-1])
+				redo_previous_try = True
+			else:
+				print("X", end="", flush=True)
+
 		source_file = None
 
 		if closest_base:
@@ -644,7 +659,7 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 			output = result.stdout.read().decode()
 			stats = parse_aig_read_stats_output(output)
 
-		solution["optimizations"].append({
+		optimization = {
 			"command_used": command,
 			"output_file": str(output_file),
 			"args_used": arguments_build_up.copy(),
@@ -653,7 +668,15 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 			"timed_out": result == None,
 			"data": stats,
 			"id": new_optimization_id
-		})
+		}
+
+		if redo_previous_try:
+			for existing_opt in solution["optimizations"]:
+				if existing_opt["args_used"] == arguments_build_up:
+					for key in optimization:
+						existing_opt[key] = optimization[key]
+		else:
+			solution["optimizations"].append(optimization)
 
 		new_optimization_id += 1
 	
@@ -682,13 +705,15 @@ def execute_optimizations(profiler: ProfilerData, optimizations: list[list[str]]
 
 		for solve_attempt_count, solve_attempt in enumerate(problem_file["solve_attempts"]):
 			for optimization_count, optimization in enumerate(optimizations):
-				
+
 				total_things_todo = total_problem_files * total_solutions * total_optimizations
 				current_total_progress_percentage = (problem_file_count * total_solutions * total_optimizations + solve_attempt_count * total_optimizations + optimization_count) / total_things_todo * 100
 				
 				print("{:.2f}% Optimizing file {}/{}, solution {}/{}, optimization {}/{}: ".format(current_total_progress_percentage, problem_file_count+1, total_problem_files, solve_attempt_count+1, total_solutions, optimization_count+1, total_optimizations), end="", flush=True)
 				# If solving did not happen, go to next solve attempt
-				if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
+				if solve_attempt["crashed"] or solve_attempt["timed_out"]:
+					print("Previous timeout or crash. Skipping...")
+					continue
 
 				# Ensure seconday output folder
 				args_used: list[str] = solve_attempt["args_used"]
@@ -708,6 +733,76 @@ def do_duplication_optimizations_for_arbiter_problems():
 		print("Aborted by user")
 	
 	profiler.save()
+
+# Searches for optimization with given arguments in list of optimizations
+def get_optimization(optimizations: list[dict], args: list[str]):
+	for opt in optimizations:
+		if opt["args_used"] == args:
+			return opt
+	return None
+
+# Calculates percentage of decrease in size, a.k.a. our view of what "gain" is
+def calculate_optimization_gain(previous_AND_gate_count: int, new_AND_gate_count: int) -> float:
+	difference = previous_AND_gate_count - new_AND_gate_count
+	gain = difference / previous_AND_gate_count
+	return gain
+
+
+# Returns dictionary collecting exploded results from repetition optimizations
+def collect_duplication_data(problem_files: list[dict]) -> dict:
+	duplication_data = {"head": [], "tail": [], "repetition": [], "value": []}
+	for arg_head in ABC_OPTIMIZATION_ARGUMENTS:
+		for arg_tail in ABC_OPTIMIZATION_ARGUMENTS:
+			if arg_head == arg_tail: continue
+
+			for problem_file in problem_files:
+				if problem_file["known_unrealizable"] == True: continue
+
+				for solve_attempt in problem_file["solve_attempts"]:
+					if solve_attempt["timed_out"] or solve_attempt["crashed"]: continue
+
+					AND_count_history = [solve_attempt["data"]["and_gates"]]
+
+					for repetition in range(REPETITION_TEST_MAX_REPETITION):
+						test = [arg_head] * repetition + [arg_tail]
+						optimization = get_optimization(solve_attempt["optimizations"], test)
+						
+						if optimization["timed_out"]:
+							raise Exception("Data not available due to previous timed-out calculation")
+
+						previous = AND_count_history[-1]
+						current = optimization["data"]["and_gates"]
+						AND_count_history.append(current)
+
+						gain = 100 * calculate_optimization_gain(previous, current)
+
+						duplication_data["head"].append(arg_head)
+						duplication_data["tail"].append(arg_tail)
+						duplication_data["repetition"].append(repetition)
+						duplication_data["value"].append(gain)			
+
+	return duplication_data
+
+# Plots the repetition minimization results into a separate window
+def plot_repetition_minimization_results():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	data = collect_duplication_data(profiler.data["problem_files"])
+	figure = sns.catplot(data=data, col="head", x="repetition", y="value", hue="tail", kind="boxen")
+	plt.show()
+	
+
+
+# def test_data():
+# 	profiler = ProfilerData(PROFILER_SOURCE)
+# 	a = collect_duplication_data(profiler.data["problem_files"])
+# 	return a
+
+# def add_aig():
+# 	profiler = ProfilerData(PROFILER_SOURCE)
+# 	add_aig_stats_to_profiler(profiler)
+# 	profiler.save()
+
+
 
 test_cmd1 = './build/knor examples/full_arbiter_8.tlsf.ehoa --sym -b > test.aig'
 test_cmd2 = './build/_deps/abc-build/abc -c "read test.aig; print_stats"'
