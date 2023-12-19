@@ -1,3 +1,15 @@
 # ignore build directory
 build
 examples/*ehoa-*
+
+# profiler ignores
+.venv
+aigs_minimized/
+aigs_unminimized/
+profiler*.json
+
+# abc history
+abc.history
+
+# ide
+.vscode/
