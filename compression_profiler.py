@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from profiler_arguments import *
 
 ABC_BINARY = Path("build/_deps/abc-build/abc")
 ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
@@ -20,82 +21,7 @@ UNMINIMIZED_AIG_FOLDER = Path("aigs_unminimized")
 MINIMIZED_AIG_FOLDER = Path("aigs_minimized")
 PROBLEM_FILES_FOLDER = Path("examples")
 
-MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 30 # seconds
-MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND = 120 # seconds
-
-REPETITION_TEST_MAX_REPETITION = 5
-
 PROFILER_SOURCE = Path("profiler.json")
-
-# These args can be combined
-# Order does not matter
-# No arguments is possibility too
-KNOR_ARGS = [
-	"--no-bisim",	# Because adding --bisim is default
-	"--binary",		# Because --onehot is default
-	"--isop",		# Because ITE is default
-	
-	# "--best", 	# To find the combo of --bisim/no-bisim, --isop/ite and --onehot/binary
-	# "--compress" # No use of compress. This will be measured later
-]
-
-# Exactly one arg should be selected at a time
-OINK_SOLVER_ARGS = [
-	"--sym",	# Default
-	# Tangle learning family, aim of research
-	"--tl",		# Recommended
-	"--rtl",	# Recommended
-	# "--ortl",
-	# "--ptl",
-	# "--spptl",
-	# "--dtl",
-	# "--idtl",
-	# Fixpoint algorithm, artrocious behaviour
-	"--fpi",	# Recommended
-	"--fpj",	# Recommended
-	# "--fpjg",
-	# Priority promotion family
-	"--npp",	# Recommended
-	# "--pp",
-	# "--ppp",
-	# "--rr",
-	# "--dp",
-	# "--rrdp",
-	# Zielonka's recursive algorithm
-	# "--zlk",
-	# "--uzlk",
-	# "--zlkq",
-	# "--zlkpp-std",
-	# "--zlkpp-waw",
-	# "--zlkpp-liv",
-	# Strategy improvement
-	# "--psi",
-	# "--ssi",
-	# Progress measures
-	# "--tspm",
-	# "--spm",
-	# "--mspm",
-	# "--sspm",
-	# "--bsspm",
-	# "--qpt",
-	# "--bqpt",
-]
-
-ABC_OPTIMIZATION_ARGUMENTS = [
-	"b -l",
-	"rw -l",
-	"rwz -l",
-	"rf -l",
-	"rfz -l",
-	# "rs -K 6 -l",
-	# "rs -K 6 -N 2 -l",
-	# "rs -K 8 -l",
-	# "rs -K 8 -N 2 -l",
-	# "rs -K 10 -l",
-	# "rs -K 10 -N 2 -l",
-	# "rs -K 12 -l",
-	# "rs -K 12 -N 2 -l",
-]
 
 class SolveResult(Enum):
 	TIMED_OUT = 1
@@ -670,6 +596,8 @@ def execute_optimization_for_solution(solution: dict, arguments: list[str], outp
 			"id": new_optimization_id
 		}
 
+		write_comment_to_aig_file(output_file, "Optimized with ABC arguments:\n{}".format(arguments))
+
 		if redo_previous_try:
 			for existing_opt in solution["optimizations"]:
 				if existing_opt["args_used"] == arguments_build_up:
@@ -725,7 +653,7 @@ def execute_optimizations(profiler: ProfilerData, optimizations: list[list[str]]
 # Executes all duplication optimizations for all "arbiter" problem solutions
 def do_duplication_optimizations_for_arbiter_problems():
 	profiler = ProfilerData(Path("profiler.json"))
-	optimizations = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, 5)
+	optimizations = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, REPETITION_TEST_MAX_REPETITION)
 
 	try:
 		execute_optimizations(profiler, optimizations, problem_regex=".*arbiter.*")
@@ -750,7 +678,7 @@ def calculate_optimization_gain(previous_AND_gate_count: int, new_AND_gate_count
 
 # Returns dictionary collecting exploded results from repetition optimizations
 def collect_duplication_data(problem_files: list[dict]) -> dict:
-	duplication_data = {"head": [], "tail": [], "repetition": [], "value": []}
+	duplication_data = {"head": [], "tail": [], "repetition": [], "gain": []}
 	for arg_head in ABC_OPTIMIZATION_ARGUMENTS:
 		for arg_tail in ABC_OPTIMIZATION_ARGUMENTS:
 			if arg_head == arg_tail: continue
@@ -779,15 +707,16 @@ def collect_duplication_data(problem_files: list[dict]) -> dict:
 						duplication_data["head"].append(arg_head)
 						duplication_data["tail"].append(arg_tail)
 						duplication_data["repetition"].append(repetition)
-						duplication_data["value"].append(gain)			
+						duplication_data["gain"].append(gain)
 
 	return duplication_data
 
 # Plots the repetition minimization results into a separate window
 def plot_repetition_minimization_results():
 	profiler = ProfilerData(PROFILER_SOURCE)
+	sns.set_theme()
 	data = collect_duplication_data(profiler.data["problem_files"])
-	figure = sns.catplot(data=data, col="head", x="repetition", y="value", hue="tail", kind="boxen")
+	figure = sns.catplot(data=data, col="head", x="repetition", y="gain", hue="tail", kind="boxen")
 	plt.show()
 	
 
