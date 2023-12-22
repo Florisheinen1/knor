@@ -662,6 +662,17 @@ def do_duplication_optimizations_for_arbiter_problems():
 	
 	profiler.save()
 
+def do_duplication_optimizations_for_all_problems():
+	profiler = ProfilerData(Path("profiler.json"))
+	optimizations = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, REPETITION_TEST_MAX_REPETITION)
+
+	try:
+		execute_optimizations(profiler, optimizations)
+	except KeyboardInterrupt:
+		print("Aborted by user")
+
+	profiler.save()
+
 # Searches for optimization with given arguments in list of optimizations
 def get_optimization(optimizations: list[dict], args: list[str]):
 	for opt in optimizations:
