@@ -147,27 +147,6 @@ class ProfilerData:
 # 	command = "./{} {} {} > {}".format(KNOR_BINARY, file, " ".join(args), output_file)
 # 	return command, output_file
 
-# Returns a list of all argument combinations to give to Knor
-def create_knor_arguments_combinations(knor_args: list[str], oink_args: list[str], binary_out: bool = True) -> list[list[str]]:
-	# Get all possible combinations of knor args
-	knor_arg_combinations = []
-	for i in range(len(knor_args) + 1):
-		l = []
-		for c in itertools.combinations(knor_args, i):
-			l.append(c)
-		knor_arg_combinations.extend(l)
-
-	all_arg_combinations = []
-	# Now, combine knor arg combos with every possible oink arg
-	for oink_arg in oink_args:
-		for knor_arg_combo in knor_arg_combinations:
-			new_combo = list(knor_arg_combo)
-			new_combo.append(oink_arg)
-			new_combo.append("-b" if binary_out else "-a")
-			all_arg_combinations.append(new_combo)
-	
-	return all_arg_combinations
-
 # # Returns list of problem files in the PROBLEM_FILES_FOLDER
 # # Optional: regex to only select matching file names
 # def get_problem_files(regex: str=None) -> list[Path]:
@@ -642,29 +621,34 @@ def initialize_problem_files(profiler: ProfilerData):
 			})
 
 # Checks if performing the given solve attempt will gain us new information
-def is_solve_attempt_worth_it(problem_file: dict, solve_argument_combo: list[str], solve_timeout_seconds: int) -> bool:
+def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str], solve_timeout_seconds: int) -> bool:
 	""" Tells if attempting to solve the given problem with given arguments will give new data.\n
 		Returns True unless:
 		- The problem is unrealizable
 		- Previous solve attempt crashed
-		- Previous solve attempt timed out, and this time no more time is allowed"""
+		- Previous solve attempt timed out, and this time no more time is allowed
+		- Successfully solved it already"""
 	if problem_file["known_unrealizable"]: return False
 
 	previous_solve_attempt = None
 	for solve_attempt in problem_file["solve_attempts"]:
-		if solve_attempt["args_used"] == solve_argument_combo:
+		if solve_attempt["args_used"] == knor_argument_combo:
 			previous_solve_attempt = solve_attempt
 			break
 	
 	# If we have not tried this yet, we will gain new information by trying
-	if not previous_solve_attempt: return True
+	if not previous_solve_attempt:
+		return True
+	else:
+		# If we have tried before:
+		# Do not retry if previous time crashed
+		if previous_solve_attempt["crashed"]: return False
+		
+		# If previous try timed out, only retry if we have bigger timeout this time
+		if previous_solve_attempt["timed_out"] and solve_timeout_seconds > solve_attempt["solve_time"]: return True
 
-	# If solve attempt crashed, do not retry
-	if previous_solve_attempt["crashed"]: return False
-	# If solve attempt timed out, only retry if we have more time
-	if previous_solve_attempt["timed_out"] and solve_attempt["solve_time"] >= solve_timeout_seconds: return False
-
-	return True
+		# Otherwise, we should not try again
+		return False
 
 def run_shell_command(cmd: str, timeout_seconds: float | None) -> subprocess.Popen[bytes] | None:
 	""" Runs linux shell command with given timeout in seconds.
@@ -675,15 +659,44 @@ def run_shell_command(cmd: str, timeout_seconds: float | None) -> subprocess.Pop
 		p.wait(timeout=timeout_seconds)
 		return p
 	except subprocess.TimeoutExpired:
-		print("Timed out!")
 		os.killpg(os.getpgid(p.pid), signal.SIGTERM)
 		return None
 
+def parse_aig_read_stats_output(cmd_output: str) -> dict:
+	""" Parses AIG stats from given output of a shell command.\n
+	 	Looks for the first ABC 'print_stats' output and returns tuple of:
+		- Number of AND gates,
+		- Number of logic levels (a.k.a. depth of network),
+		- Number of latches,
+		- Number of inputs,
+		- Number of outputs"""
+	sanitized_output = cmd_output.replace(" ","")
+	try:
+		and_gates = int(re.findall("and=[0-9]*", sanitized_output)[0].split("=")[1])
+		latches = int(re.findall("lat=[0-9]*", sanitized_output)[0].split("=")[1])
+		levels = int(re.findall("lev=[0-9]*", sanitized_output)[0].split("=")[1])
+		inputs, outputs = map(int, re.findall("i/o=[0-9]*/[0-9]*",sanitized_output)[0].split("=")[1].split("/"))
+		
+		return {
+			"and_gates": and_gates,
+			"levels": levels,
+			"latches": latches,
+			"inputs": inputs,
+			"outputs": outputs
+		}
+	except:
+		tqdm.write("Failed to parse {}".format(cmd_output))
+
+def get_aig_stats_from_file(file: Path) -> dict:
+	""" Reads given AIG file with ABC and returns its stats."""
+	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
+	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.read().decode()
+	return parse_aig_read_stats_output(cmd_output)
+
 def solve_problem_files(
-		problem_files: list[dict], 
-		solve_argument_combos: list[list[str]], 
-		profiler: ProfilerData, 
-		verbose=True, 
+		problem_files: list[dict],
+		knor_argument_combos: list[list[str]],
+		verbose=True, # TODO: Implement this
 		solve_timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND):
 	""" Solves each gven problem file with all given Knor argument combinations.
 		Given timeout applies to the timeout of each solve attempt."""
@@ -692,52 +705,95 @@ def solve_problem_files(
 	if not UNMINIMIZED_AIG_FOLDER.is_dir():
 		UNMINIMIZED_AIG_FOLDER.mkdir()
 
-	for problem_file in tqdm(problem_files, desc="problem_file", position=0):
+	for problem_file in tqdm(problem_files, desc="problem_file", position=0, leave=False):
+		problem_file_source = Path(problem_file["source"])
+		if not problem_file_source.is_file():
+			tqdm.write("Error: problem file '{}' not available".format(problem_file_source))
+			#TODO: Check if this works
+
+		# Skip this problem file if we already know it is unrealizable
+		if problem_file["known_unrealizable"]:
+			tqdm.write("Skipping '{}' because its unrealizable".format(problem_file_source))
+			continue
 		
 		# Prepare the specific output folder for this problem file
-		problem_file_source = Path(problem_file["source"])
-		# TODO: Check if this problem file still exists
 		solution_output_folder = UNMINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
+		if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
 
-		for solve_argument_combo in tqdm(solve_argument_combos, desc="arg_combination", position=1, leave=False):
-			if not is_solve_attempt_worth_it(problem_file, solve_argument_combo, solve_timeout):
+		for knor_argument_combo in tqdm(knor_argument_combos, desc="arg_combination", position=1, leave=False):
+			if not is_solve_attempt_worth_it(problem_file, knor_argument_combo, solve_timeout):
+				tqdm.write("Skipping solving '{}' with args {}".format(problem_file_source, knor_argument_combo))
 				continue
 			
-			output_file_name = problem_file_source.with_stem(problem_file_source.stem + "_args" + "".join(solve_argument_combo)).with_suffix(".aag" if "-a" in solve_argument_combo else ".aig").name
+			output_file_name = problem_file_source.with_stem(problem_file_source.stem + "_args" + "".join(knor_argument_combo)).with_suffix(".aag" if "-a" in knor_argument_combo else ".aig").name
 			output_file = solution_output_folder / output_file_name
 
-			solve_command = "./{} {} {} > {}".format(KNOR_BINARY, problem_file_source, " ".join(solve_argument_combo), output_file)
+			solve_command = "./{} {} {} > {}".format(KNOR_BINARY, problem_file_source, " ".join(knor_argument_combo), output_file)
 
 			command_start = time.time()
 			try:
-				result = run_shell_command(solve_command, solve_timeout)
+				command_result = run_shell_command(solve_command, solve_timeout)
 			except KeyboardInterrupt:
-				tqdm.write("Aborted after: {:.2f}s".format(time.time() - command_start))
+				tqdm.write("Aborted solving '{}' with {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, time.time() - command_start))
 				return
 			command_time = time.time() - command_start
-			
+
+			solution_data = None
 			solve_result = SolveResult.SOLVED
-			if not result:
-				tqdm.write("Timed out in: {:.2f}s ({} with {})".format(command_time, problem_file_source, solve_argument_combo))
+			if not command_result:
+				tqdm.write("Timeout for solving '{}' with args{} in: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
 				solve_result = SolveResult.TIMED_OUT
-			elif result.returncode == 10:
-				tqdm.write("Solved in: {:.2f}s".format(command_time))
-				# TODO Read solution stats and store these as well
-			elif result.returncode == 20:
-				tqdm.write("Unrealizable in: {:.2f}s".format(command_time))
+			elif command_result.returncode == 10:
+				# Successfully solved problem, so read solution AIG data
+				tqdm.write("Solved '{}' with args {} in {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
+				solution_data = get_aig_stats_from_file(output_file)
+			elif command_result.returncode == 20:
+				tqdm.write("Unrealizable to solve '{}'. Took: {:.2f}s".format(problem_file_source, command_time))
 				solve_result = SolveResult.UNREALIZABLE
 			else:
-				tqdm.write("Crashed in: {:.2f}s".format(command_time))
+				tqdm.write("Crashed from solving '{}' with args {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
 				solve_result = SolveResult.CRASHED
 
-			profiler.handle_command_result(
-				problem_file_source,
-				solve_argument_combo,
-				solve_command,
-				output_file,
-				command_time,
-				solve_result
-			)
+			# === Store the new result
+			
+			if solve_result == SolveResult.UNREALIZABLE:
+				problem_file["known_unrealizable"] = True
+				# Do not try new knor solve combinations as this problem is unrealizable
+				break
+			
+			# Check if given solve already happened
+			previous_solve_attempt = None
+			for solve_attempt in problem_file["solve_attempts"]:
+				if solve_attempt["args_used"] == knor_argument_combo:
+					previous_solve_attempt = solve_attempt
+					break
+			
+			if not previous_solve_attempt:
+				# This is a new attempt, so just append to existing list
+				problem_file["solve_attempts"].append({
+					"args_used": knor_argument_combo,
+					"output_file": str(output_file),
+					"command_used": solve_command,
+					"timed_out": solve_result == SolveResult.TIMED_OUT,
+					"crashed": solve_result == SolveResult.CRASHED,
+					"solve_time": command_time,
+					"data": solution_data,
+					"optimizations": []
+				})
+			else:
+				tqdm.write("Updated previous solve attempt of: '{}' with args: {}".format(problem_file_source, knor_argument_combo))
+				# Retry attempt, so update previous attempt
+				previous_solve_attempt["data"] = solution_data
+
+				if solve_result == SolveResult.SOLVED or solve_result == SolveResult.UNREALIZABLE:
+					previous_solve_attempt["timed_out"] = False
+					previous_solve_attempt["crashed"] = False
+					previous_solve_attempt["solve_time"] = command_time
+				else: # Crashed or timed out
+					previous_solve_attempt["timed_out"] = solve_result == SolveResult.TIMED_OUT
+					previous_solve_attempt["crashed"] = solve_result == SolveResult.CRASHED
+					# Set solve time to longest we have tried
+					previous_solve_attempt["solve_time"] = max(previous_solve_attempt["solve_time"], command_time)
 
 def find_new_optimization_id(solution: dict) -> int:
 	""" Searches all existing optimization ids of the given solution and returns a new, highest one.
@@ -812,38 +868,12 @@ def create_abc_optimization_command(
 	command = "./{} -c '{}'".format(ABC_BINARY, arguments_string)
 	return command
 
-def parse_aig_read_stats_output(cmd_output: str) -> dict:
-	""" Parses AIG stats from given output of a shell command.\n
-	 	Looks for the first ABC 'print_stats' output and returns tuple of:
-		- Number of AND gates,
-		- Number of logic levels (a.k.a. depth of network),
-		- Number of latches,
-		- Number of inputs,
-		- Number of outputs"""
-	sanitized_output = cmd_output.replace(" ","")
-	try:
-		and_gates = int(re.findall("and=[0-9]*", sanitized_output)[0].split("=")[1])
-		latches = int(re.findall("lat=[0-9]*", sanitized_output)[0].split("=")[1])
-		levels = int(re.findall("lev=[0-9]*", sanitized_output)[0].split("=")[1])
-		inputs, outputs = map(int, re.findall("i/o=[0-9]*/[0-9]*",sanitized_output)[0].split("=")[1].split("/"))
-		
-		return {
-			"and_gates": and_gates,
-			"levels": levels,
-			"latches": latches,
-			"inputs": inputs,
-			"outputs": outputs
-		}
-	except:
-		print("Failed to parse: \n\n{}".format(sanitized_output))
-
 def write_comment_to_aig_file(aig_file: Path, comment: str):
 	""" Appends given comment to given AIG file."""
 	with open(aig_file, "a") as file:
 		file.write("c\n")
 		file.write(comment)
 		file.write("\n")
-
 
 def execute_optimization_on_solution(solution: dict, arguments: list[str], output_folder: Path, verbose: bool=True):
 	""" Executes the optimizations of given arguments if they have not been done before on the given solution.
@@ -971,7 +1001,41 @@ def get_problem_files(profiler: ProfilerData, regex: str = None) -> list[dict]:
 
 	return matching_problem_files
 
+def get_knor_arguments_combinations(knor_strategy_args: list[str], oink_solve_args: list[str], binary_out: bool = True) -> list[list[str]]:
+	""" Returns a list of all argument combinations to give to Knor.
+		If binary_out is False, '-a' will be appended instead '-b'."""
+	# Get all possible combinations of knor args
+	knor_arg_combinations = []
+	for i in range(len(knor_strategy_args) + 1):
+		l = []
+		for c in itertools.combinations(knor_strategy_args, i):
+			l.append(c)
+		knor_arg_combinations.extend(l)
+
+	all_arg_combinations = []
+	# Now, combine knor arg combos with every possible oink arg
+	for oink_arg in oink_solve_args:
+		for knor_arg_combo in knor_arg_combinations:
+			new_combo = list(knor_arg_combo)
+			new_combo.append(oink_arg)
+			new_combo.append("-b" if binary_out else "-a")
+			all_arg_combinations.append(new_combo)
+	
+	return all_arg_combinations
+
+def test_arbiter_solvers():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	initialize_problem_files(profiler)
+	profiler.save()
+	target_knor_args = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
+	solve_problem_files(target_problem_files, target_knor_args, profiler, solve_timeout=11)
+	profiler.save()
+
+# test_arbiter_solvers()
+
 # ========================================================================================
+
 
 
 # def test_data():
