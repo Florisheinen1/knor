@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from profiler_arguments import *
+from tqdm import tqdm
 
 ABC_BINARY = Path("build/_deps/abc-build/abc")
 ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
@@ -687,26 +688,19 @@ def solve_problem_files(
 	""" Solves each gven problem file with all given Knor argument combinations.
 		Given timeout applies to the timeout of each solve attempt."""
 	
-	total_planned_solves = len(problem_files) * len(solve_argument_combos)
-
 	# Prepare the general output folder for solutions
 	if not UNMINIMIZED_AIG_FOLDER.is_dir():
 		UNMINIMIZED_AIG_FOLDER.mkdir()
 
-	for problem_file_index, problem_file in enumerate(problem_files):
+	for problem_file in tqdm(problem_files, desc="problem_file", position=0):
 		
 		# Prepare the specific output folder for this problem file
 		problem_file_source = Path(problem_file["source"])
 		# TODO: Check if this problem file still exists
 		solution_output_folder = UNMINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
 
-		for arg_combo_index, solve_argument_combo in enumerate(solve_argument_combos):
-			if verbose:
-				progress_percentage = (problem_file_index * len(solve_argument_combos) + arg_combo_index) / total_planned_solves * 100
-				print("{:.1f}% (File: {}/{}, arg: {}/{})... ".format(progress_percentage, problem_file_index, len(problem_files), arg_combo_index, len(solve_argument_combos)), end="", flush=True)
-
+		for solve_argument_combo in tqdm(solve_argument_combos, desc="arg_combination", position=1, leave=False):
 			if not is_solve_attempt_worth_it(problem_file, solve_argument_combo, solve_timeout):
-				if verbose: print("Solve attempt not worth it. Skipping...")
 				continue
 			
 			output_file_name = problem_file_source.with_stem(problem_file_source.stem + "_args" + "".join(solve_argument_combo)).with_suffix(".aag" if "-a" in solve_argument_combo else ".aig").name
@@ -718,22 +712,22 @@ def solve_problem_files(
 			try:
 				result = run_shell_command(solve_command, solve_timeout)
 			except KeyboardInterrupt:
-				print("Aborted after: {:.2f}s".format(time.time() - command_start))
+				tqdm.write("Aborted after: {:.2f}s".format(time.time() - command_start))
 				return
 			command_time = time.time() - command_start
 			
 			solve_result = SolveResult.SOLVED
 			if not result:
-				if verbose: print("Timed out in: {:.2f}s ({} with {})".format(command_time, problem_file_source, solve_argument_combo))
+				tqdm.write("Timed out in: {:.2f}s ({} with {})".format(command_time, problem_file_source, solve_argument_combo))
 				solve_result = SolveResult.TIMED_OUT
 			elif result.returncode == 10:
-				if verbose: print("Solved in: {:.2f}s".format(command_time))
+				tqdm.write("Solved in: {:.2f}s".format(command_time))
 				# TODO Read solution stats and store these as well
 			elif result.returncode == 20:
-				if verbose: print("Unrealizable in: {:.2f}s".format(command_time))
+				tqdm.write("Unrealizable in: {:.2f}s".format(command_time))
 				solve_result = SolveResult.UNREALIZABLE
 			else:
-				if verbose: print("Crashed in: {:.2f}s".format(command_time))
+				tqdm.write("Crashed in: {:.2f}s".format(command_time))
 				solve_result = SolveResult.CRASHED
 
 			profiler.handle_command_result(
@@ -860,8 +854,7 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 
 	arguments_build_up = []
 
-	if verbose: print("[", end="", flush=True)
-	for argument in arguments:
+	for argument in tqdm(arguments, desc="argument chain", position=3, leave=False):
 		arguments_build_up.append(argument)
 
 		closest_base = find_best_subset_optimization(solution, arguments_build_up)
@@ -874,23 +867,18 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 				# We can try again
 				closest_base = find_best_subset_optimization(solution, arguments_build_up[:-1])
 				redo_previous_try = True
-			else:
-				if verbose: print("X", end="", flush=True)
 
 		source_file = None
 
 		if closest_base:
 			if closest_base["args_used"] == arguments_build_up:
 				# If we already calculated this, continue to next arguments
-				if verbose: print("*", end="", flush=True)
 				continue
 			# Otherwise, branch off closest optimization
 			source_file = closest_base["output_file"]
-			if verbose: print("a", end="", flush=True)
 		else:
 			# Then we need to branch off of the original solution
 			source_file = solution["output_file"]
-			if verbose: print("o", end="", flush=True)
 
 		output_file = output_folder / "m{}.aig".format(new_optimization_id)
 
@@ -928,8 +916,6 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 
 		new_optimization_id += 1
 	
-	if verbose: print("]", flush=True)
-
 def execute_optimizations_on_solutions(
 		problem_files: list[dict],
 		solve_argument_combos: list[list[str]] | None,
@@ -940,10 +926,7 @@ def execute_optimizations_on_solutions(
 	# Ensure base folder for optimization results exists
 	if not MINIMIZED_AIG_FOLDER.is_dir(): MINIMIZED_AIG_FOLDER.mkdir()
 	
-	problem_files_count = len(problem_files)
-	optimizations_count = len(optimization_argument_combos)
-
-	for problem_file_index, problem_file in enumerate(problem_files):
+	for problem_file in tqdm(problem_files, desc="problem files", position=0):
 		if problem_file["known_unrealizable"]: continue # We cannot optimize unrealizable solutions
 
 		# Ensure problem file specific output folder
@@ -964,21 +947,13 @@ def execute_optimizations_on_solutions(
 			elif solve_argument_combos and solve_attempt["args_used"] in solve_argument_combos:
 				target_solutions.append(solve_attempt)
 
-		solutions_count = len(target_solutions)
-
-		for target_solution_index, target_solution in enumerate(target_solutions):
+		for target_solution in tqdm(target_solutions, desc="solution", position=1, leave=False):
 			# Ensure solution specific output folder
 			arguments_used_for_solution = target_solution["args_used"]
 			solution_output_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), arguments_used_for_solution))
 			if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
 
-			total_things_todo = problem_files_count * solutions_count * optimizations_count
-
-			for arg_combo_index, optimization_argument_combo in enumerate(optimization_argument_combos):
-				
-				current_total_progress_percentage = (problem_file_index * solutions_count * optimizations_count + target_solution_index * solutions_count + arg_combo_index) / total_things_todo * 100
-				if verbose: print("{:.2f}% Optimizing file {}/{}, solution {}/{}, optimization {}/{}: ".format(current_total_progress_percentage, problem_file_index+1, problem_files_count, target_solution_index+1, solutions_count, arg_combo_index+1, optimizations_count), end="", flush=True)
-				
+			for optimization_argument_combo in tqdm(optimization_argument_combos, desc="optimization", position=2, leave=False):				
 				execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder, verbose=verbose)
 
 def get_problem_files(profiler: ProfilerData, regex: str = None) -> list[dict]:
