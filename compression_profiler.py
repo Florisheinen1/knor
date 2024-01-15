@@ -270,7 +270,8 @@ def solve_problem_files(
 
 		for knor_argument_combo in tqdm(knor_argument_combos, desc="arg_combination", position=1, leave=False):
 			if not is_solve_attempt_worth_it(problem_file, knor_argument_combo, solve_timeout):
-				tqdm.write("Skipping solving '{}' with args {}".format(problem_file_source, knor_argument_combo))
+				tqdm.write("Skipping solving '{}' with args {} because not worth it".format(problem_file_source, knor_argument_combo))
+				# TODO: Better feedback message
 				continue
 			
 			output_file_name = problem_file_source.with_stem(problem_file_source.stem + "_args" + "".join(knor_argument_combo)).with_suffix(".aag" if "-a" in knor_argument_combo else ".aig").name
@@ -667,6 +668,8 @@ def solve_cleanup_optimization_tests():
 	execute_optimizations_on_solutions(target_problem_files, target_solutions, optimization_args, timeout=50)
 	profiler.save()
 
+
+
 # ========================================================================================
 
 def check_aig_data_structure(data: dict, source: str):
@@ -764,8 +767,9 @@ def check_problem_file_structure_correctness(problem_files: list[dict]):
 
 		handled_solve_attempt_args: list[list[str]] = []
 
-		for solve_attempt in problem_file["solve_attempts"]:
-			check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
+		if not problem_file["known_unrealizable"]:
+			for solve_attempt in problem_file["solve_attempts"]:
+				check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
 
 	print("Done")
 
