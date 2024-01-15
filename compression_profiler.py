@@ -722,25 +722,25 @@ def check_optimization_structure(optimization: dict,
 def check_solve_attempt_structure(solve_attempt: dict,
 								  handled_solve_attempt_args: list[list[str]],
 								  source: str):
-	if not "args_used" in solve_attempt: print("Missing 'args_used' attribute in solve attempt of '{}'".format(source))
-	if not type(solve_attempt["args_used"]) is list: print("Problem file '{}' had solution with invalid type for 'args_used' instead of list".format(source))
+	if not "args_used" in solve_attempt: raise Exception("Missing 'args_used' attribute in solve attempt of '{}'".format(source))
+	if not type(solve_attempt["args_used"]) is list: raise Exception("Problem file '{}' had solution with invalid type for 'args_used' instead of list".format(source))
 	
 	solve_args_used = solve_attempt["args_used"]
-	if solve_args_used in handled_solve_attempt_args: print("Solve attempt duplicated: {} for '{}'".format(solve_args_used, source))
+	if solve_args_used in handled_solve_attempt_args: raise Exception("Solve attempt duplicated: {} for '{}'".format(solve_args_used, source))
 	handled_solve_attempt_args.append(solve_args_used)
 
-	if not all(isinstance(x, str) for x in solve_args_used): print("Problem file '{}' had solve attempt with invalid type in 'args_used' instead of str".format(source))
+	if not all(isinstance(x, str) for x in solve_args_used): raise Exception("Problem file '{}' had solve attempt with invalid type in 'args_used' instead of str".format(source))
 
-	if not "timed_out" in solve_attempt: print("Missing 'timed_out' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
-	if not isinstance(solve_attempt["timed_out"], bool): print("Solve attempt of '{}' with args {} had invalid type for 'timed_out' instead of bool".format(source, solve_args_used))
-	if not "crashed" in solve_attempt: print("Missing 'crashed' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
-	if not isinstance(solve_attempt["crashed"], bool): print("Solve attempt of '{}' with args {} had invalid type for 'crashed' instead of bool".format(source, solve_args_used))
-	if not "solve_time" in solve_attempt: print("Missing 'solve_time' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
-	if not isinstance(solve_attempt["solve_time"], float): print("Solve attempt of '{}' with args {} had invalid type for 'solve_time' instead of float".format(source, solve_args_used))
-	if not "data" in solve_attempt: print("Missing 'data' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not "timed_out" in solve_attempt: raise Exception("Missing 'timed_out' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["timed_out"], bool): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'timed_out' instead of bool".format(source, solve_args_used))
+	if not "crashed" in solve_attempt: raise Exception("Missing 'crashed' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["crashed"], bool): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'crashed' instead of bool".format(source, solve_args_used))
+	if not "solve_time" in solve_attempt: raise Exception("Missing 'solve_time' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["solve_time"], float): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'solve_time' instead of float".format(source, solve_args_used))
+	if not "data" in solve_attempt: raise Exception("Missing 'data' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
 	# Data is allowed to be None # TODO: Only when crash or timeout
-	if not "optimizations" in solve_attempt: print("Missing 'optimizations' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
-	if not isinstance(solve_attempt["optimizations"], list): print("Solve attempt of '{}' with args {} had invalid type for 'optimizations' instead of list".format(source, solve_args_used))
+	if not "optimizations" in solve_attempt: raise Exception("Missing 'optimizations' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["optimizations"], list): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'optimizations' instead of list".format(source, solve_args_used))
 
 	handled_optimization_args: list[list[str]] = []
 	handled_optimization_ids: list[int] = []
@@ -753,17 +753,17 @@ def check_problem_file_structure_correctness(problem_files: list[dict]):
 	handled_problem_file_sources: list[str] = []
 
 	for problem_file in problem_files:
-		if not "source" in problem_file: print("Missing 'source' attribute in problem file")
-		if not type(problem_file["source"]) is str: print("Problem file 'source' type was not str")
+		if not "source" in problem_file: raise Exception("Missing 'source' attribute in problem file")
+		if not type(problem_file["source"]) is str: raise Exception("Problem file 'source' type was not str")
 
 		source = problem_file["source"]
-		if source in handled_problem_file_sources: print("Problem file is duplicate: '{}'".format(source))
+		if source in handled_problem_file_sources: raise Exception("Problem file is duplicate: '{}'".format(source))
 		handled_problem_file_sources.append(source)
 
-		if not "known_unrealizable" in problem_file: print("Missing 'known_unrealizable' attribute in '{}'".format(source))
-		if not type(problem_file["known_unrealizable"]) is bool: print("Problem file '{}' had invalid type for 'known_unrealizable' instead of boolean".format(source))
-		if not "solve_attempts" in problem_file: print("Missing 'solve_attempts' attribute in '{}'".format(source))
-		if not type(problem_file["solve_attempts"]) is list: print("Problem file '{}' had invalid type for 'solve_attempts' instead of list".format(source))
+		if not "known_unrealizable" in problem_file: raise Exception("Missing 'known_unrealizable' attribute in '{}'".format(source))
+		if not type(problem_file["known_unrealizable"]) is bool: raise Exception("Problem file '{}' had invalid type for 'known_unrealizable' instead of boolean".format(source))
+		if not "solve_attempts" in problem_file: raise Exception("Missing 'solve_attempts' attribute in '{}'".format(source))
+		if not type(problem_file["solve_attempts"]) is list: raise Exception("Problem file '{}' had invalid type for 'solve_attempts' instead of list".format(source))
 
 		handled_solve_attempt_args: list[list[str]] = []
 
@@ -776,6 +776,26 @@ def check_problem_file_structure_correctness(problem_files: list[dict]):
 def check_profiler_structure():
 	profiler = ProfilerData(PROFILER_SOURCE)
 	check_problem_file_structure_correctness(profiler.data["problem_files"])
+
+def fix_missing_data_attributes(profiler: ProfilerData):
+	problem_files = get_problem_files(profiler)
+	for problem_file in problem_files:
+		if problem_file["known_unrealizable"]: continue
+
+		source = problem_file["source"]
+		for solve_attempt in problem_file["solve_attempts"]:
+			if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
+
+			if not solve_attempt["data"]:
+				# Then this solve attempt needs to have data!
+				stats = get_aig_stats_from_file(solve_attempt["output_file"])
+				if not stats: raise Exception("Should have data, but failed to get stats in solve attempt: {} of problem '{}'".format(solve_attempt["args_used"], source))
+				solve_attempt["data"] = stats
+				print("Read and set AIG stats of solve attempt {} of problem '{}'".format(solve_attempt["args_used"], source))
+
+			# for optimization in solve_attempt["optimizations"]:
+			# 	if optimization["timed_out"]: continue
+
 
 # def test_data():
 # 	profiler = ProfilerData(PROFILER_SOURCE)
