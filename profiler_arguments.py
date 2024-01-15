@@ -28,17 +28,17 @@ OINK_SOLVER_ARGS = [
 	# "--idtl",
 	# Fixpoint algorithm, artrocious behaviour
 	"--fpi",	# Recommended
-	"--fpj",	# Recommended
+	# "--fpj",	# Recommended
 	# "--fpjg",
 	# Priority promotion family
-	"--npp",	# Recommended
+	# "--npp",	# Recommended
 	# "--pp",
 	# "--ppp",
 	# "--rr",
 	# "--dp",
 	# "--rrdp",
 	# Zielonka's recursive algorithm
-	# "--zlk",
+	"--zlk",
 	# "--uzlk",
 	# "--zlkq",
 	# "--zlkpp-std",
@@ -63,12 +63,12 @@ ABC_OPTIMIZATION_ARGUMENTS = [
 	"rwz -l",
 	"rf -l",
 	"rfz -l",
-	# "rs -K 6 -l",
-	# "rs -K 6 -N 2 -l",
-	# "rs -K 8 -l",
-	# "rs -K 8 -N 2 -l",
-	# "rs -K 10 -l",
-	# "rs -K 10 -N 2 -l",
-	# "rs -K 12 -l",
-	# "rs -K 12 -N 2 -l",
+	"rs -K 6 -l",
+	"rs -K 6 -N 2 -l",
+	"rs -K 8 -l",
+	"rs -K 8 -N 2 -l",
+	"rs -K 10 -l",
+	"rs -K 10 -N 2 -l",
+	"rs -K 12 -l",
+	"rs -K 12 -N 2 -l",
 ]

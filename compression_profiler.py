@@ -49,440 +49,17 @@ class ProfilerData:
 			json.dump(self.data, file, indent=3)
 		print("Saved results in '{}'".format(self.source))
 
-	# Inserts given command result into data
-	def handle_command_result(
-			self,
-			problem_source: Path,
-			args_used: list[str],
-			command_used: str,
-			output_file: Path,
-			solve_time: float,
-			result: SolveResult
-			):
-		for problem_file in self.data["problem_files"]:
-			if problem_file["source"] == str(problem_source):
-				# If we know problem is unrealizable, set it
-				problem_file["known_unrealizable"] |= result == SolveResult.UNREALIZABLE
-				
-				# Check if given solve already happened
-				for attempt in problem_file["solve_attempts"]:
-					if attempt["args_used"] == args_used:
-						attempt["command_used"] = command_used
-						attempt["output_file"] = str(output_file)
-						# We already did this command before
-						if result == SolveResult.SOLVED or result == SolveResult.UNREALIZABLE:
-							attempt["timed_out"] = False
-							attempt["crashed"] = False
-							# Save fastest solve/unrealizable
-							attempt["solve_time"] = min(attempt["solve_time"], solve_time)
-						else: # Crashed or timed out
-							attempt["timed_out"] = result == SolveResult.TIMED_OUT
-							attempt["crashed"] = result == SolveResult.CRASHED
-							# Set solve time to longest we have tried
-							attempt["solve_time"] = max(attempt["solve_time"], solve_time)
-						return
-				# Otherwise, add solve to problem file
-				problem_file["solve_attempts"].append({
-					"args_used": args_used,
-					"output_file": str(output_file),
-					"command_used": command_used,
-					"timed_out": result == SolveResult.TIMED_OUT,
-					"crashed": result == SolveResult.CRASHED,
-					"solve_time": solve_time
-				})
-				return
-		# Otherotherwise, create new probem file with given solve data
-		self.data["problem_files"].append({
-			"source": str(problem_source),
-			"known_unrealizable": result == SolveResult.UNREALIZABLE,
-			"solve_attempts": [
-				{
-					"args_used": args_used,
-					"output_file": str(output_file),
-					"command_used": command_used,
-					"timed_out": result == SolveResult.TIMED_OUT,
-					"crashed": result == SolveResult.CRASHED,
-					"solve_time": solve_time
-				}
-			]
-		})
+# ====================== Plotters ======================== #
 
-	# Returns whether running given commmand will give new results
-	def is_new_command(self, problem_source: Path, args: list[str], solve_time: float):
-		for problem_file in self.data["problem_files"]:
-			if problem_file["source"] == str(problem_source):
-				if problem_file["known_unrealizable"]: return False
-				for solve_attempt in problem_file["solve_attempts"]:
-					if solve_attempt["args_used"] == args:
-						# Only try again if not crashed, but timed out with less time than available this time
-						is_new = \
-							not solve_attempt["crashed"] \
-							and solve_attempt["timed_out"] \
-							and solve_attempt["solve_time"] < solve_time
-						return is_new
-				# We have not attempted to solve with given args yet
-				return True
-		# We have not attempted to solve the given problem yet
-		return True
-	
-# # Creates knor command that solves the given problem file with given arguments
-# # Returns command and target output file
-# def create_knor_command(file: Path, args: list[str], output_folder: Path = None) -> tuple[str, Path]:
-# 	# First, ensure the default output folder if none is specified
-# 	if not output_folder:
-# 		if not UNMINIMIZED_AIG_FOLDER.is_dir():
-# 			UNMINIMIZED_AIG_FOLDER.mkdir()
+def get_solve_attempt_with_args(solve_attempts: list[dict], args: list[str]) -> dict | None:
+	# Finds the solve attempt that matches the given optimization arguments
+	for attempt in solve_attempts:
+		if attempt["args_used"] == args:
+			return attempt
+	return None
 
-# 		output_folder = UNMINIMIZED_AIG_FOLDER / file.name.rstrip("".join(file.suffixes))
-		
-# 		if not output_folder.exists():
-# 			output_folder.mkdir()
-# 	# And make sure the output folder exists (whether specified or not)
-# 	if not output_folder.is_dir():
-# 		raise FileNotFoundError("Could not find or create output folder: {}".format(output_folder))
-	
-# 	output_file_name = file.with_stem(file.stem + "_args" + "".join(args)).with_suffix(".aag" if "-a" in args else ".aig").name
-# 	output_file = output_folder / output_file_name
-	
-# 	command = "./{} {} {} > {}".format(KNOR_BINARY, file, " ".join(args), output_file)
-# 	return command, output_file
-
-# # Returns list of problem files in the PROBLEM_FILES_FOLDER
-# # Optional: regex to only select matching file names
-# def get_problem_files(regex: str=None) -> list[Path]:
-# 	problem_file_list = []
-	
-# 	for item in Path(PROBLEM_FILES_FOLDER).iterdir():
-# 		if item.is_file():
-# 			if regex:
-# 				if re.match(regex, item.name):
-# 					problem_file_list.append(item)
-# 			else:
-# 				problem_file_list.append(item)
-# 	return problem_file_list
-
-# # Solves the given problem files with the given argument combinations and stores stats in given profiling data
-# def solve_problem_files(files: list[Path], arg_combinations: list[list[str]], profiler_data: ProfilerData, timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND):
-# 	total_commands = len(files) * len(arg_combinations)
-	
-# 	for file_num, file in enumerate(files):
-# 		for arg_combo_num, arg_combo in enumerate(arg_combinations):
-# 			progress_percentage = (file_num * len(arg_combinations) + arg_combo_num) / total_commands * 100
-# 			print("{:.1f}% (File: {}/{}, arg: {}/{})... ".format(progress_percentage, file_num, len(files), arg_combo_num, len(arg_combinations)), end="", flush=True)
-
-# 			if not profiler_data.is_new_command(file, arg_combo, timeout):
-# 				print("Already computed. Skipping...")
-# 				continue
-
-# 			command, output_file = create_knor_command(file, arg_combo)
-
-# 			command_start = time.time()
-# 			try:
-# 				result = run_shell_command(command, timeout)
-# 			except KeyboardInterrupt:
-# 				print("Aborted after: {:.2f}s".format(time.time() - command_start))
-# 				return
-# 			command_time = time.time() - command_start
-
-# 			solve_result = SolveResult.SOLVED
-# 			if not result:
-# 				print("Timed out in: {:.2f}s ({} with {})".format(command_time, file, arg_combo))
-# 				solve_result = SolveResult.TIMED_OUT
-# 			elif result.returncode == 10:
-# 				print("Solved in: {:.2f}s".format(command_time))
-# 			elif result.returncode == 20:
-# 				print("Unrealizable in: {:.2f}s".format(command_time))
-# 				solve_result = SolveResult.UNREALIZABLE
-# 			else:
-# 				print("Crashed in: {:.2f}s".format(command_time))
-# 				solve_result = SolveResult.CRASHED
-			
-# 			profiler_data.handle_command_result(
-# 				file,
-# 				arg_combo,
-# 				command,
-# 				output_file,
-# 				command_time,
-# 				solve_result
-# 			)
-
-# # Reads all AIG output files in profiler and adds the read data to the profiler
-# def add_aig_stats_to_profiler(profiler: ProfilerData, reread: bool=False):
-# 	problem_files_count = len(profiler.data["problem_files"])
-# 	for count, problem_file in enumerate(profiler.data["problem_files"]):
-# 		percentage = count / problem_files_count * 100
-# 		print("{:.2f}% Reading solutions of problem {}/{}... ".format(percentage, count + 1, problem_files_count), flush=True, end="")
-# 		read_solution_counter = 0
-# 		start_time = time.time()
-# 		if not problem_file["known_unrealizable"]:
-# 			for solve_attempt in problem_file["solve_attempts"]:
-# 				if not solve_attempt["timed_out"] and not solve_attempt["crashed"]:
-# 					# This solve attempt was successful
-# 					if "data" in solve_attempt and not reread: continue # Data already calculated
-# 					solution_file = Path(solve_attempt["output_file"])
-# 					aig_stats = get_aig_stats_from_file(solution_file)
-# 					solve_attempt["data"] = aig_stats
-# 					read_solution_counter += 1
-# 			read_time = time.time() - start_time
-# 			print("Read {} solutions in {:.2f}s".format(read_solution_counter, read_time))
-# 		else: print("Unrealizable, no solutions.")
-
-# # Runs ABC 'read' and 'print_stats' command on fiven file and returns the parsed stats
-# def get_aig_stats_from_file(file: Path):
-# 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
-# 	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.read().decode()
-# 	return parse_aig_read_stats_output(cmd_output)
-
-# Will create a solution for every possible example problem file. This takes looong...
-def solve_all_problem_files():
-	profiler = ProfilerData(PROFILER_SOURCE)
-	problem_files = get_problem_files()
-	arg_combos = create_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
-	solve_problem_files(problem_files, arg_combos, profiler)
-	profiler.save()
-
-# Solves all arbiter problems
-def solve_all_arbiter_problem_files():
-	profiler = ProfilerData(PROFILER_SOURCE)
-	problem_files = get_problem_files(".*arbiter.*")
-	arg_combos = create_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
-	solve_problem_files(problem_files, arg_combos, profiler)
-	profiler.save()
-
-
-# # Prepares profiler data structure and returns first new optimization ID
-# def prepare_solution_optimizations(solution_data: dict, abc_args: list[str], output_folder: Path) -> int:
-# 	if not "optimizations" in solution_data: solution_data["optimizations"] = []
-
-# 	# Get highest optimization id
-# 	highest_optimization_id = 0
-# 	for optimization in solution_data["optimizations"]:
-# 		if optimization["id"] > highest_optimization_id:
-# 			highest_optimization_id = optimization["id"]
-# 	# Increment for next optimization
-# 	new_optimization_id = highest_optimization_id + 1
-
-# 	# Make sure all single optimization arguments have been executed
-# 	for abc_arg in abc_args:
-# 		single_abc_arg_in_optimizations = False
-# 		for optimization in solution_data["optimizations"]:
-# 			if optimization["args_used"] == [abc_arg]:
-# 				single_abc_arg_in_optimizations = True
-# 				break
-		
-# 		# If we already made this optimization, check the next one
-# 		if single_abc_arg_in_optimizations: continue
-
-# 		# Create this single argument optimization
-# 		command, output_file = create_abc_optimization_command(
-# 			solution_data["output_file"],
-# 			[abc_arg],
-# 			new_optimization_id,
-# 			output_folder)
-		
-# 		optimize_start = time.time()
-# 		result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND)
-# 		optimize_time = time.time() - optimize_start
-		
-# 		optimized_data = parse_aig_read_stats_output(result.stdout.decode())
-
-# 		solution_data["optimizations"].append({
-# 			"command_used": command,
-# 			"output_file": str(output_file),
-# 			"args_used": [abc_arg],
-# 			"compress_time_python": optimize_time,
-# 			"actual_compress_time": None,
-# 			"timed_out": optimized_data == None,
-# 			"data": optimized_data,
-# 			"id": new_optimization_id
-# 		})
-		
-# 		new_optimization_id += 1
-
-# 		write_comment_to_aig_file(output_file, "This file was optimized with the following ABC arguments:\n{}".format(", ".join([abc_arg])))
-			
-# 	return new_optimization_id
-	
-# def get_optimizations_of_depth(solution: dict, depth: int) -> list[dict]:
-# 	optimizations = []
-# 	for optimization in solution["optimizations"]:
-# 		if len(optimization["args_used"]) == depth:
-# 			optimizations.append(optimization)
-# 	return optimizations
-
-# def branch_off_optimizations(solution: dict, abc_args: list[str], output_folder: Path, next_id: int):
-# 	# Now iterate over compression methods
-# 	progress_made = True
-# 	optimize_depth = 1
-# 	while progress_made:
-# 		progress_made = False
-
-# 		total_best_gain = 1
-
-# 		branch_depth_start = time.time()
-# 		for optimization in get_optimizations_of_depth(solution, optimize_depth):
-# 			previous_optimize_args = optimization["args_used"]
-# 			previous_AND_gate_count = optimization["data"]["and_gates"]
-# 			min_AND_gate_gain = 1
-
-# 			for abc_arg in abc_args:
-# 				new_optimize_args = previous_optimize_args + [abc_arg]
-
-# 				# Check if this has already been calculated
-# 				is_calculated = False
-# 				for opt in solution["optimizations"]:
-# 					if opt["args_used"] == new_optimize_args:
-# 						is_calculated = True
-# 				if is_calculated: continue
-
-# 				command, output_file = create_abc_optimization_command(optimization["output_file"], [abc_arg], next_id, output_folder)
-
-# 				optimize_start = time.time()
-# 				result = run_shell_command(command, 60)
-# 				optimize_time = time.time() - optimize_start
-
-# 				output_data = None
-# 				if result != None:
-# 					output_data = parse_aig_read_stats_output(result.stdout.decode())
-
-# 				solution["optimizations"].append({
-# 					"command_used": command,
-# 					"output_file": str(output_file),
-# 					"args_used": new_optimize_args,
-# 					"compress_time_python": optimize_time,
-# 					"actual_compress_time": None,
-# 					"timed_out": output_data == None,
-# 					"data": output_data,
-# 					"id": next_id
-# 				})
-
-# 				gain = output_data["and_gates"] / previous_AND_gate_count
-# 				min_AND_gate_gain = min(min_AND_gate_gain, gain)
-
-# 				write_comment_to_aig_file(output_file, "This file was optimized with the following ABC arguments:\n{}".format(", ".join(new_optimize_args)))
-
-# 				next_id += 1
-
-# 			if min_AND_gate_gain < 0.99:
-# 				# There has been an optimization of more than 1%
-# 				progress_made = True
-# 			total_best_gain = min(total_best_gain, min_AND_gate_gain)
-		
-		
-# 		branch_depth_time = time.time() - branch_depth_start
-# 		print("Branched depth level: {} in {:.2f} seconds with gain: {}".format(optimize_depth, branch_depth_time, total_best_gain))
-
-# 		optimize_depth += 1
-# 		# progress_made = False
-# 		if optimize_depth > 4:
-# 			progress_made = False
-
-# def try_minimization_methods(profiler: ProfilerData, abc_args: list[str]):
-# 	if not MINIMIZED_AIG_FOLDER.is_dir():
-# 		MINIMIZED_AIG_FOLDER.mkdir()
-	
-# 	for problem_file in profiler.data["problem_files"]:
-# 		# If unrealizable, there can be no minimization
-# 		if problem_file["known_unrealizable"]: continue
-
-# 		problem_file_source = Path(problem_file["source"])
-# 		problem_folder = MINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
-
-# 		if not problem_folder.is_dir(): problem_folder.mkdir()
-
-# 		for solve_attempt in problem_file["solve_attempts"]:
-# 			if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
-
-# 			args_used: list[str] = solve_attempt["args_used"]
-# 			solution_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), args_used))
-# 			if not solution_folder.is_dir(): solution_folder.mkdir()
-
-# 			new_highest_id = prepare_solution_optimizations(solve_attempt, abc_args, solution_folder)
-
-# 			branch_start = time.time()
-# 			branch_off_optimizations(solve_attempt, abc_args, solution_folder, new_highest_id)
-# 			branch_time = time.time() - branch_start
-# 			print("Branched for solution {} in {:.2f}s".format(args_used, branch_time))
-
-# 	profiler.save()
-
-# Returns a list of arguments used for checking if duplicate sequential arguments have positive effect
-# def get_duplication_optimization_arguments(arguments: list[str], depth: int) -> list[list[str]]:
-# 	arguments_list = []
-# 	for argument in arguments:
-# 		arguments_list.append([argument])
-
-# 		for heading_argument in arguments:
-# 			if heading_argument == argument: continue
-# 			for heading_length in range(1, depth):
-# 				arguments_list.append([heading_argument] * heading_length + [argument])
-# 	return arguments_list
-
-# # Will optimize all solutions (that match regex) with each given optimization
-# def execute_optimizations(profiler: ProfilerData, optimizations: list[list[str]], problem_regex: str = None):
-# 	if not MINIMIZED_AIG_FOLDER.is_dir(): MINIMIZED_AIG_FOLDER.mkdir()
-	
-# 	total_problem_files = len(profiler.data["problem_files"])
-# 	total_optimizations = len(optimizations)
-
-# 	for problem_file_count, problem_file in enumerate(profiler.data["problem_files"]):
-# 		# If regex specified and not matching, skip this problem file
-# 		if problem_regex and not re.match(problem_regex, problem_file["source"]): continue
-
-# 		# If unrealizable, there can be no minimization
-# 		if problem_file["known_unrealizable"]: continue
-
-# 		# Ensure primary output folder
-# 		problem_file_source = Path(problem_file["source"])
-# 		problem_folder = MINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
-# 		if not problem_folder.is_dir(): problem_folder.mkdir()
-
-# 		total_solutions = len(problem_file["solve_attempts"])
-
-# 		for solve_attempt_count, solve_attempt in enumerate(problem_file["solve_attempts"]):
-# 			for optimization_count, optimization in enumerate(optimizations):
-
-# 				total_things_todo = total_problem_files * total_solutions * total_optimizations
-# 				current_total_progress_percentage = (problem_file_count * total_solutions * total_optimizations + solve_attempt_count * total_optimizations + optimization_count) / total_things_todo * 100
-				
-# 				print("{:.2f}% Optimizing file {}/{}, solution {}/{}, optimization {}/{}: ".format(current_total_progress_percentage, problem_file_count+1, total_problem_files, solve_attempt_count+1, total_solutions, optimization_count+1, total_optimizations), end="", flush=True)
-# 				# If solving did not happen, go to next solve attempt
-# 				if solve_attempt["crashed"] or solve_attempt["timed_out"]:
-# 					print("Previous timeout or crash. Skipping...")
-# 					continue
-
-# 				# Ensure seconday output folder
-# 				args_used: list[str] = solve_attempt["args_used"]
-# 				solution_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), args_used))
-# 				if not solution_folder.is_dir(): solution_folder.mkdir()
-
-# 				execute_optimization_for_solution(solve_attempt, optimization, solution_folder)
-
-# # Executes all duplication optimizations for all "arbiter" problem solutions
-# def do_duplication_optimizations_for_arbiter_problems():
-# 	profiler = ProfilerData(Path("profiler.json"))
-# 	optimizations = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, REPETITION_TEST_MAX_REPETITION)
-
-# 	try:
-# 		execute_optimizations(profiler, optimizations, problem_regex=".*arbiter.*")
-# 	except KeyboardInterrupt:
-# 		print("Aborted by user")
-	
-# 	profiler.save()
-
-# def do_duplication_optimizations_for_all_problems():
-# 	profiler = ProfilerData(Path("profiler.json"))
-# 	optimizations = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, REPETITION_TEST_MAX_REPETITION)
-
-# 	try:
-# 		execute_optimizations(profiler, optimizations)
-# 	except KeyboardInterrupt:
-# 		print("Aborted by user")
-
-# 	profiler.save()
-
-# Searches for optimization with given arguments in list of optimizations
-def get_optimization(optimizations: list[dict], args: list[str]):
+def get_optimization_with_args(optimizations: list[dict], args: list[str]) -> dict | None:
+	# Finds the optimization that matches the given optimization arguments
 	for opt in optimizations:
 		if opt["args_used"] == args:
 			return opt
@@ -511,7 +88,9 @@ def collect_duplication_data(problem_files: list[dict]) -> dict:
 
 					for repetition in range(REPETITION_TEST_MAX_REPETITION):
 						test = [arg_head] * repetition + [arg_tail]
-						optimization = get_optimization(solve_attempt["optimizations"], test)
+						optimization = get_optimization_with_args(solve_attempt["optimizations"], test)
+						
+						if not optimization: continue
 						
 						if optimization["timed_out"]:
 							raise Exception("Data not available due to previous timed-out calculation")
@@ -555,40 +134,7 @@ def plot_repetition_minimization_results():
 # 		print(x)
 
 
-
-# def test_if_cleanup_has_effect():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	for problem_file in profiler.data["problem_files"]:
-
-# 		# If unrealizable, there can be no minimization
-# 		if problem_file["known_unrealizable"]: continue
-
-# 		# Ensure primary output folder
-# 		problem_file_source = Path(problem_file["source"])
-# 		problem_folder = MINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
-# 		if not problem_folder.is_dir(): problem_folder.mkdir()
-
-# 		for solve_attempt in problem_file["solve_attempts"]:
-
-# 			# Skip timed out or crashed ones
-# 			if solve_attempt["timed_out"] or solve_attempt["crashed"]: continue
-
-# 			# Ensure seconday output folder
-# 			args_used: list[str] = solve_attempt["args_used"]
-# 			solution_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), args_used))
-# 			if not solution_folder.is_dir(): solution_folder.mkdir()
-
-# 			execute_optimization_for_solution(solve_attempt, ["cleanup"], solution_folder)
-
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
-# ======================================================================================================
+# =========================== Solvers ================================ #
 
 def get_problem_file_paths() -> list[Path]:
 	""" Gets list of all problem file paths.
@@ -630,7 +176,7 @@ def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str]
 		- Successfully solved it already"""
 	if problem_file["known_unrealizable"]: return False
 
-	previous_solve_attempt = None
+	previous_solve_attempt: dict | None = None
 	for solve_attempt in problem_file["solve_attempts"]:
 		if solve_attempt["args_used"] == knor_argument_combo:
 			previous_solve_attempt = solve_attempt
@@ -645,7 +191,7 @@ def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str]
 		if previous_solve_attempt["crashed"]: return False
 		
 		# If previous try timed out, only retry if we have bigger timeout this time
-		if previous_solve_attempt["timed_out"] and solve_timeout_seconds > solve_attempt["solve_time"]: return True
+		if previous_solve_attempt["timed_out"] and solve_timeout_seconds > previous_solve_attempt["solve_time"]: return True
 
 		# Otherwise, we should not try again
 		return False
@@ -662,7 +208,7 @@ def run_shell_command(cmd: str, timeout_seconds: float | None) -> subprocess.Pop
 		os.killpg(os.getpgid(p.pid), signal.SIGTERM)
 		return None
 
-def parse_aig_read_stats_output(cmd_output: str) -> dict:
+def parse_aig_read_stats_output(cmd_output: str) -> dict | None:
 	""" Parses AIG stats from given output of a shell command.\n
 	 	Looks for the first ABC 'print_stats' output and returns tuple of:
 		- Number of AND gates,
@@ -687,10 +233,12 @@ def parse_aig_read_stats_output(cmd_output: str) -> dict:
 	except:
 		tqdm.write("Failed to parse {}".format(cmd_output))
 
-def get_aig_stats_from_file(file: Path) -> dict:
+def get_aig_stats_from_file(file: Path) -> dict | None:
 	""" Reads given AIG file with ABC and returns its stats."""
 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
-	cmd_output = run_shell_command(abc_read_cmd, 10).stdout.read().decode()
+	command_result = run_shell_command(abc_read_cmd, 10)
+	if not command_result or not command_result.stdout: return None
+	cmd_output = command_result.stdout.read().decode()
 	return parse_aig_read_stats_output(cmd_output)
 
 def solve_problem_files(
@@ -738,7 +286,7 @@ def solve_problem_files(
 				return
 			command_time = time.time() - command_start
 
-			solution_data = None
+			solution_data: dict | None = None
 			solve_result = SolveResult.SOLVED
 			if not command_result:
 				tqdm.write("Timeout for solving '{}' with args{} in: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
@@ -809,8 +357,8 @@ def find_new_optimization_id(solution: dict) -> int:
 	new_optimization_id = highest_optimization_id + 1
 	return new_optimization_id
 
-def find_best_subset_optimization(solution: dict, wanted_args: list[str]) -> dict | None:	
-	""" Goes through optimizations of given solution, and finds the best one
+def find_best_subset_optimization(optimizations: list[dict], wanted_args: list[str]) -> dict | None:	
+	""" Goes through given optimizations, and finds the best one
 		that can serve as a base for the wanted optimization.\n
 		Example -> Solution1 has following optimizations:\n
 			- ('A')
@@ -822,7 +370,7 @@ def find_best_subset_optimization(solution: dict, wanted_args: list[str]) -> dic
 		"""
 	most_similar_optimization = None
 
-	for optimization in solution["optimizations"]:
+	for optimization in optimizations:
 		used_args = optimization["args_used"]
 		# If more used args then wanted, this optimization is of no use
 		if len(used_args) > len(wanted_args): continue
@@ -848,7 +396,7 @@ def find_best_subset_optimization(solution: dict, wanted_args: list[str]) -> dic
 def create_abc_optimization_command(
 		source_file: Path,
 		optimization_arguments: list[str],
-		output_file: Path) -> tuple[str, Path]:
+		output_file: Path) -> str:
 	""" Creates an ABC optimization command.
 		- Source file is a path to an AIG file
 		- Optimization_arguments is a list of optimize arguments that will be applied to the source
@@ -875,7 +423,7 @@ def write_comment_to_aig_file(aig_file: Path, comment: str):
 		file.write(comment)
 		file.write("\n")
 
-def execute_optimization_on_solution(solution: dict, arguments: list[str], output_folder: Path, verbose: bool=True):
+def execute_optimization_on_solution(solution: dict, arguments: list[str], output_folder: Path, verbose: bool=True, optimize_timeout: float=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND):
 	""" Executes the optimizations of given arguments if they have not been done before on the given solution.
 		Ensures intermediate optimization results are stored as well for reuse later.
 		Stores results in given output folder."""
@@ -884,68 +432,89 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 
 	arguments_build_up = []
 
-	for argument in tqdm(arguments, desc="argument chain", position=3, leave=False):
+	# Go through each argument and try to optimize the solution with the argument chain up till then 
+	for argument in arguments:
 		arguments_build_up.append(argument)
 
-		closest_base = find_best_subset_optimization(solution, arguments_build_up)
-
-		redo_previous_try = False
-
-		if closest_base and closest_base["timed_out"]:
-			# Best base timed out, so we either try again or skip this one
-			if closest_base["optimize_time_python"] < MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND:
-				# We can try again
-				closest_base = find_best_subset_optimization(solution, arguments_build_up[:-1])
-				redo_previous_try = True
-
-		source_file = None
-
-		if closest_base:
-			if closest_base["args_used"] == arguments_build_up:
-				# If we already calculated this, continue to next arguments
+		# Find previous optimization attempt for these built-up arguments chain
+		previous_optimize_attempt = get_optimization_with_args(solution["optimizations"], arguments_build_up)
+		
+		# If previous optimization attempt exists, only continue if it makes sense to try it again
+		if previous_optimize_attempt:
+			# If previous optimization was successful, we can go to the next argument
+			if not previous_optimize_attempt["timed_out"]:
+				# tqdm.write("Already completed optimization {} for solution {}".format(arguments_build_up, solution["args_used"]))
 				continue
-			# Otherwise, branch off closest optimization
-			source_file = closest_base["output_file"]
+			# If previous attempt timed out and we do not have more time than then, this optimization cannot be done
+			if optimize_timeout <= previous_optimize_attempt["optimize_time_python"]:
+				tqdm.write("Cannot imrpove timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]))
+				return
+
+		# The file that needs to be optimized
+		source_file: Path
+
+		origin_arguments = arguments_build_up[:-1]
+
+		# If no arguments, we must optimize the source problem file solution
+		if not origin_arguments:
+			source_file = Path(solution["output_file"])
 		else:
-			# Then we need to branch off of the original solution
-			source_file = solution["output_file"]
+			# Otherwise optimize a previous optimization with args "origin_arguments"
+			origin_optimization = get_optimization_with_args(solution["optimizations"], origin_arguments)
+
+			# If we failed to find the origin optimization, return
+			if not origin_optimization:
+				tqdm.write("Failed to find optimization base for {} ({}) on solution {}".format(arguments_build_up, origin_arguments, solution["args_used"]))
+				return
+			
+			source_file = Path(origin_optimization["output_file"])
+
+		# Check if source file actually still exists
+		if not source_file.exists():
+			tqdm.write("Source file missing: '{}'".format(source_file))
+			return
 
 		output_file = output_folder / "m{}.aig".format(new_optimization_id)
-
-		command, output_file = create_abc_optimization_command(source_file, [argument], output_file)
+		command = create_abc_optimization_command(source_file, [argument], output_file)
 
 		optimize_start = time.time()
 		result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND)
 		optimize_time = time.time() - optimize_start
 		
-		stats = None
-		if result:
+		stats: dict | None = None
+		if result and result.stdout:
 			output = result.stdout.read().decode()
 			stats = parse_aig_read_stats_output(output)
 
-		optimization = {
-			"command_used": command,
-			"output_file": str(output_file),
-			"args_used": arguments_build_up.copy(),
-			"optimize_time_python": optimize_time,
-			"actual_optimize_time": None,
-			"timed_out": result == None,
-			"data": stats,
-			"id": new_optimization_id
-		}
+		# If we retry optimization, update previous one. Otherwise, append it
+		if previous_optimize_attempt:
+			previous_optimize_attempt["command_used"] = command
+			previous_optimize_attempt["output_file"] = output_file
+			previous_optimize_attempt["args_used"] = arguments_build_up
+			previous_optimize_attempt["optimize_time_python"] = optimize_time
+			previous_optimize_attempt["actual_optimize_time"] = None
+			previous_optimize_attempt["timed_out"] = result == None
+			previous_optimize_attempt["data"] = stats
+			previous_optimize_attempt["id"] = new_optimization_id
+			tqdm.write("Retried optimization {} of {}".format(arguments_build_up, solution["args_used"]))
+		else:
+			optimization = {
+				"command_used": command,
+				"output_file": str(output_file),
+				"args_used": arguments_build_up.copy(),
+				"optimize_time_python": optimize_time,
+				"actual_optimize_time": None,
+				"timed_out": result == None,
+				"data": stats,
+				"id": new_optimization_id
+			}
+			solution["optimizations"].append(optimization)
+			# tqdm.write("Did optimization {} of {}".format(arguments_build_up, solution["args_used"]))
 
 		write_comment_to_aig_file(output_file, "Optimized with ABC arguments:\n{}".format(arguments))
 
-		if redo_previous_try:
-			for existing_opt in solution["optimizations"]:
-				if existing_opt["args_used"] == arguments_build_up:
-					for key in optimization:
-						existing_opt[key] = optimization[key]
-		else:
-			solution["optimizations"].append(optimization)
-
 		new_optimization_id += 1
-	
+
 def execute_optimizations_on_solutions(
 		problem_files: list[dict],
 		solve_argument_combos: list[list[str]] | None,
@@ -957,36 +526,56 @@ def execute_optimizations_on_solutions(
 	if not MINIMIZED_AIG_FOLDER.is_dir(): MINIMIZED_AIG_FOLDER.mkdir()
 	
 	for problem_file in tqdm(problem_files, desc="problem files", position=0):
-		if problem_file["known_unrealizable"]: continue # We cannot optimize unrealizable solutions
+		if problem_file["known_unrealizable"]:
+			tqdm.write("Unrealizable problem file cannot be optimized: '{}'".format(problem_file["source"]))
+			continue # We cannot optimize unrealizable solutions
 
 		# Ensure problem file specific output folder
 		problem_file_source = Path(problem_file["source"])
 		problem_folder = MINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
 		if not problem_folder.is_dir(): problem_folder.mkdir()
 
-		# Collect solutions to apply optimizations on
+		# Get all solve attempts that would fit our wanted "solve_argument" combos
+		matching_solve_attempts: list[dict] = []
+		if not solve_argument_combos:
+			# Select all solve attempts
+			matching_solve_attempts = problem_file["solve_attempts"]
+		else:
+			# Find the solve attempts that match
+			for solve_argument_combo in solve_argument_combos:
+				matching = get_solve_attempt_with_args(problem_file["solve_attempts"], solve_argument_combo)
+				if matching: matching_solve_attempts.append(matching)
+				else: tqdm.write("Warning: Missing solve attempt {} for '{}'".format(solve_argument_combo, problem_file_source))
+
+		# Filter out invalid solutions
 		target_solutions = []
-		for solve_attempt in problem_file["solve_attempts"]:
-			# Failed solve attempts cannot be optimized
-			if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
+		for matching_solve_attempt in matching_solve_attempts:
+			if matching_solve_attempt["crashed"] or matching_solve_attempt["timed_out"]:
+				# We cannot optimize this solution, so skip it
+				tqdm.write("Cannot optimize solution of '{}' with {} because the solve attempt {}".format(
+					problem_file_source,
+					matching_solve_attempt["args_used"],
+					"crashed" if matching_solve_attempt["crashed"] else "timed out"))
+			else:
+				target_solutions.append(matching_solve_attempt)
 
-			# If we want to optimize all solutions, add this solution anyways
-			if not solve_argument_combos:
-				target_solutions.append(solve_attempt)
-			# If we specified solutions to optimize, see if this solution is in that list
-			elif solve_argument_combos and solve_attempt["args_used"] in solve_argument_combos:
-				target_solutions.append(solve_attempt)
-
+		# Then apply optimizations to target solutions
 		for target_solution in tqdm(target_solutions, desc="solution", position=1, leave=False):
-			# Ensure solution specific output folder
+			# Ensure solution specific output folder exists
 			arguments_used_for_solution = target_solution["args_used"]
 			solution_output_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), arguments_used_for_solution))
 			if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
 
 			for optimization_argument_combo in tqdm(optimization_argument_combos, desc="optimization", position=2, leave=False):				
-				execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder, verbose=verbose)
+				try:
+					execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder, verbose=verbose)
+				except KeyboardInterrupt:
+					tqdm.write("Aborted optimizing '{}' with optimizations {}.".format(target_solution["output_file"], optimization_argument_combo))
+					return
 
-def get_problem_files(profiler: ProfilerData, regex: str = None) -> list[dict]:
+# ======================== Solver initiators ================ #
+
+def get_problem_files(profiler: ProfilerData, regex: str | None = None) -> list[dict]:
 	""" Returns a list of problem files whose name match the given regex, or all files if regex is None."""
 	all_problem_files = profiler.data["problem_files"]
 
@@ -1023,52 +612,166 @@ def get_knor_arguments_combinations(knor_strategy_args: list[str], oink_solve_ar
 	
 	return all_arg_combinations
 
-def test_arbiter_solvers():
+def solve_arbiter_problems():
+	""" Solves all problem files with 'arbiter' in their name. """
 	profiler = ProfilerData(PROFILER_SOURCE)
 	initialize_problem_files(profiler)
-	profiler.save()
 	target_knor_args = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
 	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
-	solve_problem_files(target_problem_files, target_knor_args, profiler, solve_timeout=11)
+	solve_problem_files(target_problem_files, target_knor_args, solve_timeout=11)
 	profiler.save()
 
-# test_arbiter_solvers()
+def get_duplication_optimization_arguments(arguments: list[str], depth: int) -> list[list[str]]:
+	""" Returns a list of arguments used for checking if duplicate sequential
+		arguments have positive effect"""
+	arguments_list = []
+	for argument in arguments:
+		arguments_list.append([argument])
+
+		for heading_argument in arguments:
+			if heading_argument == argument: continue
+			for heading_length in range(1, depth):
+				arguments_list.append([heading_argument] * heading_length + [argument])
+	return arguments_list
+
+def test_duplication_optimizations_on_arbiter_solutions():
+	""" Optimizes all arbiter solutions to see if duplicate sequential optimizations make sense """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
+	target_solve_attempts = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+	target_optimization_arguments = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, 4)
+	execute_optimizations_on_solutions(target_problem_files, target_solve_attempts, target_optimization_arguments, timeout=50)
+	profiler.save()
+
+def solve_all_problem_files():
+	""" Will create a solution for every possible example problem file. This takes looong..."""
+	profiler = ProfilerData(PROFILER_SOURCE)
+	problem_files = get_problem_files(profiler)
+	arg_combos = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+	solve_problem_files(problem_files, arg_combos)
+	profiler.save()
+
+def get_cleanup_optimizations_test_arguments():
+	arg_combos = []
+	for abc_arg in ABC_OPTIMIZATION_ARGUMENTS:
+		arg_combos.append([abc_arg])
+		arg_combos.append(["cleanup", abc_arg])
+		arg_combos.append([abc_arg, "cleanup"])
+	return arg_combos
+
+def solve_cleanup_optimization_tests():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	target_problem_files = get_problem_files(profiler, None)
+	target_solutions = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+	optimization_args = get_cleanup_optimizations_test_arguments()
+	execute_optimizations_on_solutions(target_problem_files, target_solutions, optimization_args, timeout=50)
+	profiler.save()
 
 # ========================================================================================
 
-def check_profiler_structure_correctness(profiler: ProfilerData):
+def check_aig_data_structure(data: dict, source: str):
+	if not "and_gates" in data: raise Exception("AIG data missing 'and_gates' attribute of source: {}".format(source))
+	if not isinstance(data["and_gates"], int): raise Exception("AIG data had invalid 'and_gates' attribute of source: {}".format(source))
+	if not "levels" in data: raise Exception("AIG data missing 'levels' attribute of source: {}".format(source))
+	if not isinstance(data["levels"], int): raise Exception("AIG data had invalid 'levels' attribute of source: {}".format(source))
+	if not "latches" in data: raise Exception("AIG data missing 'latches' attribute of source: {}".format(source))
+	if not isinstance(data["latches"], int): raise Exception("AIG data had invalid 'latches' attribute of source: {}".format(source))
+	if not "inputs" in data: raise Exception("AIG data missing 'inputs' attribute of source: {}".format(source))
+	if not isinstance(data["inputs"], int): raise Exception("AIG data had invalid 'inputs' attribute of source: {}".format(source))
+	if not "outputs" in data: raise Exception("AIG data missing 'outputs' attribute of source: {}".format(source))
+	if not isinstance(data["outputs"], int): raise Exception("AIG data had invalid 'outputs' attribute of source: {}".format(source))
+
+def check_optimization_structure(optimization: dict,
+								 handled_optimization_args: list[list[str]],
+								 handled_optimization_ids: list[int],
+								 source: str):
+	if not "args_used" in optimization: raise Exception("Missing 'args_used' attribute in optimization of source: {}".format(source))
+	if not isinstance(optimization["args_used"], list): raise Exception("Optimization of solution had invalid 'args_used' of source: {}".format(source))
+	if not all(isinstance(x, str) for x in optimization["args_used"]): raise Exception("Invalid argument of 'args_used' in optimization of source: {}".format(source))
+
+	opt_args_used = optimization["args_used"]
+	if opt_args_used in handled_optimization_args: raise Exception("Optimization duplicated: {} of source: {}".format(opt_args_used, source))
+	handled_optimization_args.append(opt_args_used)
+
+	if not "command_used" in optimization: raise Exception("Missing 'command_used' attrbibute in optimization of source: {}".format(opt_args_used, source))
+	if not isinstance(optimization["command_used"], str): raise Exception("Invalid type for 'command_used' in opt {} of source: {}".format(opt_args_used, source))
+	if not "output_file" in optimization: raise Exception("Missing 'output_file' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
+	if not isinstance(optimization["output_file"], str): raise Exception("Invalid type for 'output_file' in opt {} of source: {}".format(opt_args_used, source))
+	if not "optimize_time_python" in optimization: raise Exception("Missing 'optimize_time_python' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
+	if not isinstance(optimization["optimize_time_python"], float): raise Exception("Invalid type for 'optimize_time_python' in opt {} of source: {}".format(opt_args_used, source))
+	if not "actual_optimize_time" in optimization: raise Exception("Missing 'actual_optimize_time' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
+	# Actual optimize time may be None
+	if not "timed_out" in optimization: raise Exception("Missing 'timed_out' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
+	if not isinstance(optimization["timed_out"], bool): raise Exception("Invalid type for 'timed_out' in opt {} of source: {}".format(opt_args_used, source))
+	if not "id" in optimization: raise Exception("Missing 'id' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
+	if not isinstance(optimization["id"], int): raise Exception("Invalid type for 'id' in opt {} of source: {}".format(opt_args_used, source))
+
+	if optimization["id"] in handled_optimization_ids: raise Exception("Duplicate optimization id: {} in optimization {} of source: {}".format(optimization["id"], opt_args_used, source))
+	handled_optimization_ids.append(optimization["id"])
+
+	if not "data" in optimization: raise Exception("Missing 'data' attribute in optimization {} of source: {}".format(opt_args_used, source))
+	if optimization["timed_out"]:
+		if isinstance(optimization["data"], dict): raise Exception("Failed optimization still has data in optimization {} of source: {}".format(opt_args_used, source))
+	else:
+		if not isinstance(optimization["data"], dict): raise Exception("Successful optimization does not have data in optimization {} of source: {}".format(opt_args_used, source))
+		check_aig_data_structure(optimization["data"], "optimization {} of {}".format(opt_args_used, source))
+
+def check_solve_attempt_structure(solve_attempt: dict,
+								  handled_solve_attempt_args: list[list[str]],
+								  source: str):
+	if not "args_used" in solve_attempt: print("Missing 'args_used' attribute in solve attempt of '{}'".format(source))
+	if not type(solve_attempt["args_used"]) is list: print("Problem file '{}' had solution with invalid type for 'args_used' instead of list".format(source))
+	
+	solve_args_used = solve_attempt["args_used"]
+	if solve_args_used in handled_solve_attempt_args: print("Solve attempt duplicated: {} for '{}'".format(solve_args_used, source))
+	handled_solve_attempt_args.append(solve_args_used)
+
+	if not all(isinstance(x, str) for x in solve_args_used): print("Problem file '{}' had solve attempt with invalid type in 'args_used' instead of str".format(source))
+
+	if not "timed_out" in solve_attempt: print("Missing 'timed_out' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["timed_out"], bool): print("Solve attempt of '{}' with args {} had invalid type for 'timed_out' instead of bool".format(source, solve_args_used))
+	if not "crashed" in solve_attempt: print("Missing 'crashed' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["crashed"], bool): print("Solve attempt of '{}' with args {} had invalid type for 'crashed' instead of bool".format(source, solve_args_used))
+	if not "solve_time" in solve_attempt: print("Missing 'solve_time' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["solve_time"], float): print("Solve attempt of '{}' with args {} had invalid type for 'solve_time' instead of float".format(source, solve_args_used))
+	if not "data" in solve_attempt: print("Missing 'data' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	# Data is allowed to be None # TODO: Only when crash or timeout
+	if not "optimizations" in solve_attempt: print("Missing 'optimizations' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
+	if not isinstance(solve_attempt["optimizations"], list): print("Solve attempt of '{}' with args {} had invalid type for 'optimizations' instead of list".format(source, solve_args_used))
+
+	handled_optimization_args: list[list[str]] = []
+	handled_optimization_ids: list[int] = []
+
+	for optimization in solve_attempt["optimizations"]:
+		check_optimization_structure(optimization, handled_optimization_args, handled_optimization_ids, "solution {} of problem file '{}'".format(solve_args_used, source))
+
+def check_problem_file_structure_correctness(problem_files: list[dict]):
 	""" Prints all errors of the given profilers data."""
-	for problem_file in profiler.data["problem_files"]:
+	handled_problem_file_sources: list[str] = []
+
+	for problem_file in problem_files:
 		if not "source" in problem_file: print("Missing 'source' attribute in problem file")
 		if not type(problem_file["source"]) is str: print("Problem file 'source' type was not str")
 
 		source = problem_file["source"]
+		if source in handled_problem_file_sources: print("Problem file is duplicate: '{}'".format(source))
+		handled_problem_file_sources.append(source)
+
 		if not "known_unrealizable" in problem_file: print("Missing 'known_unrealizable' attribute in '{}'".format(source))
 		if not type(problem_file["known_unrealizable"]) is bool: print("Problem file '{}' had invalid type for 'known_unrealizable' instead of boolean".format(source))
 		if not "solve_attempts" in problem_file: print("Missing 'solve_attempts' attribute in '{}'".format(source))
 		if not type(problem_file["solve_attempts"]) is list: print("Problem file '{}' had invalid type for 'solve_attempts' instead of list".format(source))
 
+		handled_solve_attempt_args: list[list[str]] = []
+
 		for solve_attempt in problem_file["solve_attempts"]:
-			if not "args_used" in solve_attempt: print("Missing 'args_used' attribute in solve attempt of '{}'".format(source))
-			if not type(solve_attempt["args_used"]) is list: print("Problem file '{}' had solution with invalid type for 'args_used' instead of list".format(source))
-			args_used = solve_attempt["args_used"]
-			if not all(isinstance(x, str) for x in args_used): print("Problem file '{}' had solve attempt with invalid type in 'args_used' instead of str".format(source))
-
-			if not "timed_out" in solve_attempt: print("Missing 'timed_out' attribute in solve attempt of '{}' with args {}".format(source, args_used))
-			if not isinstance(solve_attempt["timed_out"], bool): print("Solve attempt of '{}' with args {} had invalid type for 'timed_out' instead of bool".format(source, args_used))
-			if not "crashed" in solve_attempt: print("Missing 'crashed' attribute in solve attempt of '{}' with args {}".format(source, args_used))
-			if not isinstance(solve_attempt["crashed"], bool): print("Solve attempt of '{}' with args {} had invalid type for 'crashed' instead of bool".format(source, args_used))
-			if not "solve_time" in solve_attempt: print("Missing 'solve_time' attribute in solve attempt of '{}' with args {}".format(source, args_used))
-			if not isinstance(solve_attempt["solve_time"], float): print("Solve attempt of '{}' with args {} had invalid type for 'solve_time' instead of float".format(source, args_used))
-			if not "data" in solve_attempt: print("Missing 'data' attribute in solve attempt of '{}' with args {}".format(source, args_used))
-			# Data is allowed to be None
-			if not "optimizations" in solve_attempt: print("Missing 'optimizations' attribute in solve attempt of '{}' with args {}".format(source, args_used))
-			if not isinstance(solve_attempt["optimizations"], list): print("Solve attempt of '{}' with args {} had invalid type for 'optimizations' instead of list".format(source, args_used))
-
-			for optimization in solve_attempt["optimizations"]:
-				pass
+			check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
 
 	print("Done")
+
+def check_profiler_structure():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	check_problem_file_structure_correctness(profiler.data["problem_files"])
 
 # def test_data():
 # 	profiler = ProfilerData(PROFILER_SOURCE)
