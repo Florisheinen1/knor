@@ -4,8 +4,8 @@ examples/*ehoa-*
 
 # profiler ignores
 .venv
-aigs_minimized/
-aigs_unminimized/
+aigs_minimized*/
+aigs_unminimized*/
 profiler*.json
 
 # abc history

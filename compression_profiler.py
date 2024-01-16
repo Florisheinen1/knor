@@ -713,6 +713,7 @@ def check_optimization_structure(optimization: dict,
 	handled_optimization_ids.append(optimization["id"])
 
 	if not "data" in optimization: raise Exception("Missing 'data' attribute in optimization {} of source: {}".format(opt_args_used, source))
+	
 	if optimization["timed_out"]:
 		if isinstance(optimization["data"], dict): raise Exception("Failed optimization still has data in optimization {} of source: {}".format(opt_args_used, source))
 	else:
@@ -738,7 +739,12 @@ def check_solve_attempt_structure(solve_attempt: dict,
 	if not "solve_time" in solve_attempt: raise Exception("Missing 'solve_time' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
 	if not isinstance(solve_attempt["solve_time"], float): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'solve_time' instead of float".format(source, solve_args_used))
 	if not "data" in solve_attempt: raise Exception("Missing 'data' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
-	# Data is allowed to be None # TODO: Only when crash or timeout
+	
+	# If this solve attempt crashed or timed out, there is not much else to see
+	if solve_attempt["crashed"] or solve_attempt["timed_out"]: return
+	
+	check_aig_data_structure(solve_attempt["data"], "solution {} of problem file '{}'".format(solve_args_used, source))
+
 	if not "optimizations" in solve_attempt: raise Exception("Missing 'optimizations' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
 	if not isinstance(solve_attempt["optimizations"], list): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'optimizations' instead of list".format(source, solve_args_used))
 
@@ -777,13 +783,17 @@ def check_profiler_structure():
 	profiler = ProfilerData(PROFILER_SOURCE)
 	check_problem_file_structure_correctness(profiler.data["problem_files"])
 
-def fix_missing_data_attributes(profiler: ProfilerData):
+def fix_missing_attributes(profiler: ProfilerData):
 	problem_files = get_problem_files(profiler)
-	for problem_file in problem_files:
+	for problem_file in tqdm(problem_files, desc="problem files", position=0):
 		if problem_file["known_unrealizable"]: continue
 
 		source = problem_file["source"]
-		for solve_attempt in problem_file["solve_attempts"]:
+		for solve_attempt in tqdm(problem_file["solve_attempts"], desc="solve_attempt", position=1):
+			if not "data" in solve_attempt:
+				solve_attempt["data"] = None
+				tqdm.write("Added 'data' attribute to: {} of {}".format(solve_attempt["args_used"], source))
+
 			if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
 
 			if not solve_attempt["data"]:
@@ -791,11 +801,30 @@ def fix_missing_data_attributes(profiler: ProfilerData):
 				stats = get_aig_stats_from_file(solve_attempt["output_file"])
 				if not stats: raise Exception("Should have data, but failed to get stats in solve attempt: {} of problem '{}'".format(solve_attempt["args_used"], source))
 				solve_attempt["data"] = stats
-				print("Read and set AIG stats of solve attempt {} of problem '{}'".format(solve_attempt["args_used"], source))
+				tqdm.write("Read and set AIG stats of solve attempt {} of problem '{}'".format(solve_attempt["args_used"], source))
 
-			# for optimization in solve_attempt["optimizations"]:
-			# 	if optimization["timed_out"]: continue
+			if not "optimizations" in solve_attempt:
+				solve_attempt["optimizations"] = []
+				tqdm.write("Added empty optimizations list to solve attempt {} of problem {}".format(solve_attempt["args_used"], source))
 
+			for optimization in solve_attempt["optimizations"]:
+				if optimization["timed_out"]: continue
+				
+				if not "data" in optimization:
+					optimization["data"] = None
+
+				if not optimization["data"]:
+					# Then this optimization needs to have data!
+					stats = get_aig_stats_from_file(optimization["output_file"])
+					if not stats: print("Should have data, but failed to get stats in optimization: {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
+					optimization["data"] = stats
+					tqdm.write("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
+		
+def test_get(p, problem, solution, optimization):
+	s = get_problem_files(p, problem)[0]
+	a = get_solve_attempt_with_args(s["solve_attempts"], solution)
+	b = get_optimization_with_args(a["optimizations"], optimization)
+	return b
 
 # def test_data():
 # 	profiler = ProfilerData(PROFILER_SOURCE)
