@@ -52,21 +52,21 @@ class ProfilerData:
 # ====================== Plotters ======================== #
 
 def get_solve_attempt_with_args(solve_attempts: list[dict], args: list[str]) -> dict | None:
-	# Finds the solve attempt that matches the given optimization arguments
+	""" Finds the solve attempt that matches the given optimization arguments """
 	for attempt in solve_attempts:
 		if attempt["args_used"] == args:
 			return attempt
 	return None
 
 def get_optimization_with_args(optimizations: list[dict], args: list[str]) -> dict | None:
-	# Finds the optimization that matches the given optimization arguments
+	""" Finds the optimization that matches the given optimization arguments """
 	for opt in optimizations:
 		if opt["args_used"] == args:
 			return opt
 	return None
 
-# Calculates percentage of decrease in size, a.k.a. our view of what "gain" is
 def calculate_optimization_gain(previous_AND_gate_count: int, new_AND_gate_count: int) -> float:
+	""" Calculates percentage of decrease in size, a.k.a. our view of what "gain" is """
 	difference = previous_AND_gate_count - new_AND_gate_count
 	gain = difference / previous_AND_gate_count
 	return gain
@@ -115,23 +115,9 @@ def plot_repetition_minimization_results():
 	data = collect_duplication_data(profiler.data["problem_files"])
 	figure = sns.catplot(data=data, col="head", x="repetition", y="gain", hue="tail", kind="boxen")
 	plt.show()
-	
-# def do_all_arguments_once_in_pairs():
-# 	argument_combos = []
-# 	for arg1 in ABC_OPTIMIZATION_ARGUMENTS:
-# 		for arg2 in ABC_OPTIMIZATION_ARGUMENTS:
-# 			if arg2 == arg1: continue
 
-# 			argument_combos.append((arg1, arg2))
-
-# 			# for arg3 in ABC_OPTIMIZATION_ARGUMENTS:
-# 			# 	if arg3 == arg2 or arg3 == arg1: continue
-# 			# 	argument_combos.append((arg1, arg2, arg3))
-
-# 	print(len(argument_combos))
-# 	input()
-# 	for x in argument_combos:
-# 		print(x)
+def collect_cleanup_data(problem_files: list[dict], solve_attempt_args: list[list[str]]) -> dict:
+	cleanup_data = {"head"}
 
 
 # =========================== Solvers ================================ #
@@ -208,7 +194,7 @@ def run_shell_command(cmd: str, timeout_seconds: float | None) -> subprocess.Pop
 		os.killpg(os.getpgid(p.pid), signal.SIGTERM)
 		return None
 
-def parse_aig_read_stats_output(cmd_output: str) -> dict | None:
+def parse_aig_read_stats_output(cmd_output: str, verbose: bool=False) -> dict | None:
 	""" Parses AIG stats from given output of a shell command.\n
 	 	Looks for the first ABC 'print_stats' output and returns tuple of:
 		- Number of AND gates,
@@ -231,7 +217,11 @@ def parse_aig_read_stats_output(cmd_output: str) -> dict | None:
 			"outputs": outputs
 		}
 	except:
-		tqdm.write("Failed to parse {}".format(cmd_output))
+		if verbose:
+			tqdm.write("Things that went wrong parsing: \n")
+			tqdm.write(cmd_output)
+		else:
+			tqdm.write("Failed to parse aiger output.")
 
 def get_aig_stats_from_file(file: Path) -> dict | None:
 	""" Reads given AIG file with ABC and returns its stats."""
@@ -424,7 +414,7 @@ def write_comment_to_aig_file(aig_file: Path, comment: str):
 		file.write(comment)
 		file.write("\n")
 
-def execute_optimization_on_solution(solution: dict, arguments: list[str], output_folder: Path, verbose: bool=True, optimize_timeout: float=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND):
+def execute_optimization_on_solution(solution: dict, arguments: list[str], output_folder: Path, optimize_timeout: float=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND):
 	""" Executes the optimizations of given arguments if they have not been done before on the given solution.
 		Ensures intermediate optimization results are stored as well for reuse later.
 		Stores results in given output folder."""
@@ -482,6 +472,7 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 		result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND)
 		optimize_time = time.time() - optimize_start
 		
+		# Being unable to read the AIG data indicates an error occurred
 		stats: dict | None = None
 		if result and result.stdout:
 			output = result.stdout.read().decode()
@@ -569,7 +560,7 @@ def execute_optimizations_on_solutions(
 
 			for optimization_argument_combo in tqdm(optimization_argument_combos, desc="optimization", position=2, leave=False):				
 				try:
-					execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder, verbose=verbose)
+					execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder)
 				except KeyboardInterrupt:
 					tqdm.write("Aborted optimizing '{}' with optimizations {}.".format(target_solution["output_file"], optimization_argument_combo))
 					return
@@ -624,7 +615,7 @@ def solve_arbiter_problems():
 
 def get_duplication_optimization_arguments(arguments: list[str], depth: int) -> list[list[str]]:
 	""" Returns a list of arguments used for checking if duplicate sequential
-		arguments have positive effect"""
+		arguments have positive effect. """
 	arguments_list = []
 	for argument in arguments:
 		arguments_list.append([argument])
@@ -640,7 +631,7 @@ def test_duplication_optimizations_on_arbiter_solutions():
 	profiler = ProfilerData(PROFILER_SOURCE)
 	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
 	target_solve_attempts = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
-	target_optimization_arguments = get_duplication_optimization_arguments(ABC_OPTIMIZATION_ARGUMENTS, 4)
+	target_optimization_arguments = get_duplication_optimization_arguments(list(ABC_OPTIMIZATION_ARGUMENTS.keys()), 4)
 	execute_optimizations_on_solutions(target_problem_files, target_solve_attempts, target_optimization_arguments, timeout=50)
 	profiler.save()
 
@@ -668,6 +659,166 @@ def solve_cleanup_optimization_tests():
 	execute_optimizations_on_solutions(target_problem_files, target_solutions, optimization_args, timeout=50)
 	profiler.save()
 
+def get_range_of_numbers(minimum: int, maximum: int, steps: int) -> list[int]:
+	""" Divides the given range in given steps. Returns list of integers within. """
+	if steps <= 1: return [minimum]
+	step_size = (maximum - minimum) / (steps - 1)
+	nums = sorted(list(set([minimum+round(step_size*i) for i in range(steps)])))
+	return nums
+
+def get_parameter_flag_variations(flag: str, mutate: int) -> list[str]:
+	""" Gets variations of a single ABC optimization parameter flag. 
+		Mutate indicates how many numbers requested for lower and higher flag values.
+		Example: flag = '-N #8>=4<=16', mutate = 3
+		Results in ['-N 4', '-N 6', '-N 8', '-N 12', '-N 16'] """
+	base_flag = flag.split(" ")[0]
+	if not '#' in flag: return [base_flag]
+
+	nums = []
+	default = int(re.findall("#-?[0-9]*", flag)[0][1:])
+	minimum = int(re.findall(">=-?[0-9]*", flag)[0][2:])
+	nums.extend(get_range_of_numbers(minimum, default, mutate))
+
+	maxes = re.findall("<=-?[0-9]*", flag)
+	maximum = int(maxes[0][2:]) if maxes else None
+
+	if maximum:
+		nums.extend(get_range_of_numbers(default, maximum, mutate))
+	else:
+		for i in range(mutate):
+			nums.append(max(1, 2 * max(nums)))
+
+	nums = sorted(list(set(nums))) # Remove duplicates and sorts for convenience
+	return ["{} {}".format(base_flag, x) for x in nums]
+
+def get_abc_argument_flag_combinations(argument_base: str, flags: list[str], mutate: int) -> list[str]:
+	""" Gets variations of a single ABC optimization argument.\n
+		Argument base example: 'b'\n
+		Flags example: ['-l', '-d', '-s']"""
+	if not flags: return [argument_base]
+
+	flags_variations: list[list[str]] = [get_parameter_flag_variations(flag, mutate) for flag in flags]
+	
+	combos = flags_variations[0]
+	for flag_variations in flags_variations[1:]:
+		combos.extend(map(lambda x: " ".join(x), itertools.product(combos, flag_variations)))
+		combos.extend(flag_variations)
+	
+	argument_combos = [argument_base] + ["{} {}".format(argument_base, combo) for combo in combos]
+	return argument_combos
+
+def get_all_abc_opt_arguments(mutate: int) -> list[str]:
+	args = []
+	for abc_arg in ABC_OPTIMIZATION_ARGUMENTS:
+		args.extend(get_abc_argument_flag_combinations(abc_arg, ABC_OPTIMIZATION_ARGUMENTS[abc_arg], mutate))
+	return args
+
+# p = ProfilerData(PROFILER_SOURCE)
+
+# def optimize_for_test_1(profiler):
+# 	""" See if trim optimization has effect. """
+# 	a = get_target_problem_files(profiler)
+# 	b = get_target_solve_attempt_arguments()
+# 	trim_variants = get_abc_argument_flag_combinations("trim", CLEANUPS["trim"], 0)
+# 	abc_args = []
+# 	for trim_variant in trim_variants:
+# 		abc_args.append([trim_variant])
+# 		abc_args.append([trim_variant, "drw"])
+# 		abc_args.append(["drw", trim_variant])
+# 	execute_optimizations_on_solutions(a, b, abc_args, timeout=60)
+
+# def show_test_1(profiler):
+# 	a = get_target_problem_files(profiler)
+# 	b = get_target_solve_attempt_arguments()
+
+# 	for problem_file in a:
+# 		for solve_attempt in problem_file["solve_attempts"]:
+# 			if not solve_attempt["args_used"] in b: continue
+# 			pass
+
+def get_target_problem_files(profiler: ProfilerData) -> list[dict]:
+	return get_problem_files(profiler, "full_arbiter_[0-9]")
+def get_target_solve_attempt_arguments() -> list[list[str]]:
+	return get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+
+def solve_for_test_1():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b, solve_timeout=60)
+	profiler.save()
+
+def optimize_for_test_1():
+	""" See rewrite(rw) or dag-aware rewrite(drw) is better. """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
+	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
+	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	profiler.save()
+
+def show_test_1(profiler: ProfilerData, n: int = 5):
+	""" Plots the top n best average arguments for rw and drw. """
+	problem_files = get_target_problem_files(profiler)
+	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
+	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
+	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
+	optimize_arg_combos = list(map(lambda x: [x], rw_variants + drw_variants))
+	
+	raw_data = {
+		"solve_args": [],
+		"opt_arg_bases": [],
+		"opt_arg_flags": [],
+		"gains": [],
+		"times": []
+	}
+
+	for problem_file in problem_files:
+		for solve_attempt in problem_file["solve_attempts"]:
+			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+			if not solve_attempt["data"]: continue
+
+			solve_args_used = " ".join(solve_attempt["args_used"])
+
+			base_and_count = solve_attempt["data"]["and_gates"]
+
+			for optimization in solve_attempt["optimizations"]:
+				if not optimization["args_used"] in optimize_arg_combos: continue
+				if len(optimization["args_used"]) != 1: raise Exception("Expected only one argument")
+
+				argument = optimization["args_used"][0]
+				arg_base: str = argument.split(" ")[0]
+				flags: str = " ".join(argument.split(" ")[1:])
+
+				new_and_count = optimization["data"]["and_gates"]
+				gain = base_and_count / new_and_count
+
+				raw_data["solve_args"].append(solve_args_used)
+				raw_data["opt_arg_bases"].append(arg_base)
+				raw_data["opt_arg_flags"].append(flags)
+				raw_data["gains"].append(gain)
+				raw_data["times"].append(optimization["optimize_time_python"])
+
+	data = pd.DataFrame(raw_data)
+
+	# Get average of each argument over each solution
+	averaged_gain_over_files = data.groupby(["opt_arg_bases", "opt_arg_flags"]).agg({"gains": "mean"})
+	# Get the top 5 of each argument base with the highest gain
+	top_argument_df = averaged_gain_over_files.sort_values("gains", ascending=False).groupby(["opt_arg_bases"]).head(5).sort_values("opt_arg_bases").reset_index()
+
+	top_arguments_found = list(top_argument_df["opt_arg_bases"] + " " + top_argument_df["opt_arg_flags"])
+	
+	# Add complete optimization argument as column
+	data["argument"] = (data["opt_arg_bases"] + " " + data["opt_arg_flags"]).apply(lambda x: x.strip())
+	
+	plot_data = data[data["argument"].isin(top_arguments_found)]
+
+	sns.set_theme()
+	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
+	plt.xticks(rotation=45)
+	plt.show()
 
 
 # ========================================================================================
@@ -820,46 +971,3 @@ def fix_missing_attributes(profiler: ProfilerData):
 					optimization["data"] = stats
 					tqdm.write("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
 		
-def test_get(p, problem, solution, optimization):
-	s = get_problem_files(p, problem)[0]
-	a = get_solve_attempt_with_args(s["solve_attempts"], solution)
-	b = get_optimization_with_args(a["optimizations"], optimization)
-	return b
-
-# def test_data():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = collect_duplication_data(profiler.data["problem_files"])
-# 	return a
-
-# def add_aig():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	add_aig_stats_to_profiler(profiler)
-# 	profiler.save()
-
-# TODO: Check if all entries are not malformed
-# TODO: TQDM
-
-
-test_cmd1 = './build/knor examples/full_arbiter_8.tlsf.ehoa --sym -b > test.aig'
-test_cmd2 = './build/_deps/abc-build/abc -c "read test.aig; print_stats"'
-
-# def test1():
-# 	p = ProfilerData(Path("profiler.json"))
-# 	try:
-# 		try_minimization_methods(p, ABC_OPTIMIZATION_ARGUMENTS[0:2])
-# 	except KeyboardInterrupt:
-# 		print("Aborted by user")
-# 	p.save()
-	
-# def test2():
-# 	p = ProfilerData(Path("profiler.json"))
-# 	try:
-# 		try_minimization_methods(p, ABC_OPTIMIZATION_ARGUMENTS)
-# 	except KeyboardInterrupt:
-# 		print("Aborted by user")
-# 	p.save()
-
-# if __name__ == "__main__":
-	# solve_all_arbiter_problem_files()
-	# add_aig_stats_to_profiler(ProfilerData(Path("profiler.json")), True)
-	# try_minimization_methods(ProfilerData(Path("profiler.json")))
