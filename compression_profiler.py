@@ -438,7 +438,7 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 				continue
 			# If previous attempt timed out and we do not have more time than then, this optimization cannot be done
 			if optimize_timeout <= previous_optimize_attempt["optimize_time_python"]:
-				tqdm.write("Cannot imrpove timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]))
+				tqdm.write("Cannot improve timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]))
 				return
 
 		# The file that needs to be optimized
@@ -477,6 +477,9 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 		if result and result.stdout:
 			output = result.stdout.read().decode()
 			stats = parse_aig_read_stats_output(output)
+		
+		if not result:
+			tqdm.write("Timed out optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
 
 		# If we retry optimization, update previous one. Otherwise, append it
 		if previous_optimize_attempt:
