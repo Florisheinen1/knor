@@ -820,6 +820,84 @@ def show_test_1(profiler: ProfilerData, n: int = 5):
 	plt.xticks(rotation=45)
 	plt.show()
 
+def solve_for_test_2():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b, solve_timeout=60)
+	profiler.save()
+
+def optimize_for_test_2():
+	""" See if refactor (rf) or dag-aware refactor (drf) is more effective """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
+	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
+	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	profiler.save()
+
+def show_test_2(profiler: ProfilerData, n: int = 5):
+	""" Plots the top n best average rf and top n best average drf """
+	problem_files = get_target_problem_files(profiler)
+	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
+	rf_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
+	drf_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
+	optimize_arg_combos = list(map(lambda x: [x], rf_variants + drf_variants))
+	
+	raw_data = {
+		"solve_args": [],
+		"opt_arg_bases": [],
+		"opt_arg_flags": [],
+		"gains": [],
+		"times": []
+	}
+
+	for problem_file in problem_files:
+		for solve_attempt in problem_file["solve_attempts"]:
+			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+			if not solve_attempt["data"]: continue
+
+			solve_args_used = " ".join(solve_attempt["args_used"])
+
+			base_and_count = solve_attempt["data"]["and_gates"]
+
+			for optimization in solve_attempt["optimizations"]:
+				if not optimization["args_used"] in optimize_arg_combos: continue
+				if len(optimization["args_used"]) != 1: raise Exception("Expected only one argument")
+
+				argument = optimization["args_used"][0]
+				arg_base: str = argument.split(" ")[0]
+				flags: str = " ".join(argument.split(" ")[1:])
+
+				new_and_count = optimization["data"]["and_gates"]
+				gain = base_and_count / new_and_count
+
+				raw_data["solve_args"].append(solve_args_used)
+				raw_data["opt_arg_bases"].append(arg_base)
+				raw_data["opt_arg_flags"].append(flags)
+				raw_data["gains"].append(gain)
+				raw_data["times"].append(optimization["optimize_time_python"])
+
+	data = pd.DataFrame(raw_data)
+
+	# Get average of each argument over each solution
+	averaged_gain_over_files = data.groupby(["opt_arg_bases", "opt_arg_flags"]).agg({"gains": "mean"})
+	# Get the top 5 of each argument base with the highest gain
+	top_argument_df = averaged_gain_over_files.sort_values("gains", ascending=False).groupby(["opt_arg_bases"]).head(5).sort_values("opt_arg_bases").reset_index()
+
+	top_arguments_found = list(top_argument_df["opt_arg_bases"] + " " + top_argument_df["opt_arg_flags"])
+	
+	# Add complete optimization argument as column
+	data["argument"] = (data["opt_arg_bases"] + " " + data["opt_arg_flags"]).apply(lambda x: x.strip())
+	
+	plot_data = data[data["argument"].isin(top_arguments_found)]
+
+	sns.set_theme()
+	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
+	plt.xticks(rotation=45)
+	plt.show()
 
 # ========================================================================================
 
