@@ -69,7 +69,7 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 		"-z",			# toggle using zero-cost replacements [default = no]
 	],
 	"rf": [				# performs technology-independent refactoring of the AIG
-		"-N #10>=0",	# the max support of the collapsed node [default = 10]
+		"-N #10>=2<=15",# the max support of the collapsed node [default = 10]
 		# "-M #1>=0",	# the min number of nodes saved after one step (0 <= num) [default = 1]	// Introduced in a newer commit of abc
 		"-l",			# toggle preserving the number of levels [default = yes]
 		"-z",			# toggle using zero-cost replacements [default = no]
@@ -85,8 +85,8 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 	],
 	"drf": [			# performs combinational AIG refactoring
 		"-M #2>=0",		# the min MFFC size to attempt refactoring [default = 2]
-		"-K #12>=0",	# the max number of cuts leaves [default = 12]
-		"-C #5>=0",		# the max number of cuts to try at a node [default = 5]
+		"-K #12>=4<=15",# the max number of cuts leaves [default = 12]
+		"-C #5>=2",		# the max number of cuts to try at a node [default = 5]
 		"-e",			# toggle extending tbe cut below MFFC [default = no]
 		"-l",			# toggle preserving the number of levels [default = no]
 		"-z",			# toggle using zero-cost replacements [default = no]
