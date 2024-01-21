@@ -755,6 +755,97 @@ def get_target_problem_files(profiler: ProfilerData) -> list[dict]:
 def get_target_solve_attempt_arguments() -> list[list[str]]:
 	return get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
 
+def solve_for_test_0():
+	""" Solves each problem file with each Knor argument combination. """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b)
+	profiler.save()
+
+def show_test_0():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
+
+	raw_data = {
+		"problem_file_source": [],
+		"solve_args": [],
+		"synthesize_args": [],
+		"solve_time": [],
+		"and_gates": [],
+		"increase": [] 	# Increase in size compared to baseline (smallest AIG per problem file)
+	}
+
+	# Collect the minimums
+	minimum_and_gates = {}
+	for problem_file in profiler.data["problem_files"]:
+		if problem_file["known_unrealizable"]: continue
+		for solve_attempt in problem_file["solve_attempts"]:
+			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+			if not solve_attempt["data"]: continue
+
+			source = problem_file["source"]
+			current_and_count = solve_attempt["data"]["and_gates"]
+			if source not in minimum_and_gates:
+				minimum_and_gates[source] = current_and_count
+			else:
+				minimum_and_gates[source] = min(minimum_and_gates[source], current_and_count) # At least 1 so we can compare
+	
+	# Compare each solution with the minimum (but not the 0 bests)
+	for problem_file in profiler.data["problem_files"]:
+		if problem_file["known_unrealizable"]: continue
+		for solve_attempt in problem_file["solve_attempts"]:
+			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+			if not solve_attempt["data"]: continue
+
+			source = problem_file["source"]
+			args_used = solve_attempt["args_used"]
+			solve_args = args_used[-2]
+			synthesize_args = args_used[:-2]
+			and_count = solve_attempt["data"]["and_gates"]
+			solve_time = solve_attempt["solve_time"]
+
+			minimum_of_this_file = minimum_and_gates[source]
+			if minimum_of_this_file == 0: continue
+
+			increase = and_count / minimum_and_gates[source]
+
+			raw_data["problem_file_source"].append(source)
+			raw_data["solve_args"].append(solve_args)
+			raw_data["synthesize_args"].append(synthesize_args)
+			raw_data["solve_time"].append(solve_time)
+			raw_data["and_gates"].append(and_count)
+			raw_data["increase"].append(increase)
+
+	df = pd.DataFrame(raw_data)
+
+	df["synthesize_str"] = df["synthesize_args"].apply(lambda x: str(x))
+
+	sns.set_theme()
+	sns.catplot(data=df, kind="boxen", x="solve_args", y="increase", hue="synthesize_str")
+	plt.xticks(rotation=45)
+	plt.show()
+
+
+	return df
+
+
+"""
+
+
+
+Which one minimizes best?
+-> table
+
+What is the ratio of time / optimization?
+
+(Which one is most efficient)
+
+
+
+"""
+
+
 # Test 1: Compare rw and drw optimizations performance
 def solve_for_test_1():
 	profiler = ProfilerData(PROFILER_SOURCE)
