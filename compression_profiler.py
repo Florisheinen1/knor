@@ -915,6 +915,106 @@ def show_test_2(profiler: ProfilerData, n: int = 5):
 	plt.xticks(rotation=45)
 	plt.show()
 
+# Test 3: Test if other optimizations are any good
+def solve_for_test_3():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b, solve_timeout=60)
+	profiler.save()
+
+def optimize_for_test_3():
+	""" Test if one of the other optimization arguments are good. """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+
+	opt_args = []
+	for arg in ["drwsat", "rs", "dc2", "irw", "irws", "iresyn"]:
+		opt_args.extend(get_abc_argument_flag_combinations(arg, ABC_OPTIMIZATION_ARGUMENTS[arg], 3))
+	opt_args = list(map(lambda x: [x], opt_args))
+	
+	execute_optimizations_on_solutions(a, b, opt_args, timeout=60)
+	profiler.save()
+
+def show_test_3(profiler: ProfilerData):
+	pass # TODO: Implement this
+
+# Test 4: Test balance performance. Probably not amazing
+def solve_for_test_4():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b, solve_timeout=60)
+	profiler.save()
+
+def optimize_for_test_4():
+	""" Optimizes all target solutions with the balance optimization """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	balances = list(map(lambda x: [x], get_abc_argument_flag_combinations("b", ABC_OPTIMIZATION_ARGUMENTS["b"], 3)))
+	execute_optimizations_on_solutions(a, b, balances, timeout=60)
+	profiler.save()
+
+def show_test_4(profiler: ProfilerData):
+	pass # TODO: Implement this
+
+# Test 5: Are extreme drw flags better than small normal drw flags?
+def solve_for_test_5():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b, solve_timeout=60)
+	profiler.save()
+
+def optimize_for_test_5():
+	""" See if drw performs better with extremely big parameters """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	extreme_drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3, True)
+	joint_args = list(map(lambda x: [x], extreme_drw_variants))
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	profiler.save()
+
+def show_test_5(profiler: ProfilerData):
+	pass # TODO: Implement
+
+# Test 6: Are extreme drf flags better than small normal drf flags?
+def solve_for_test_6():
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	solve_problem_files(a, b, solve_timeout=60)
+	profiler.save()
+
+def optimize_for_test_6():
+	""" See if drf performs better with extremely big parameters """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	extreme_drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3, True)
+	joint_args = list(map(lambda x: [x], extreme_drw_variants))
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	profiler.save()
+
+def show_test_6(profiler: ProfilerData):
+	pass # TODO: Implement
+
+# # Chaining tests
+# def solve_for_test_5():
+# 	pass
+
+# def optimize_for_test_5():
+# 	""" Optimizes all to see if duplicate sequential optimizations make sense """
+# 	profiler = ProfilerData(PROFILER_SOURCE)
+# 	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
+# 	target_solve_attempts = get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
+# 	target_optimization_arguments = get_duplication_optimization_arguments(list(ABC_OPTIMIZATION_ARGUMENTS.keys()), 4)
+# 	execute_optimizations_on_solutions(target_problem_files, target_solve_attempts, target_optimization_arguments, timeout=50)
+# 	profiler.save()
+
 # ========================================================================================
 
 def check_aig_data_structure(data: dict, source: str):
