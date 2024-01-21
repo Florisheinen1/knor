@@ -951,7 +951,7 @@ def solve_for_test_4():
 def optimize_for_test_4():
 	""" Optimizes all target solutions with the balance optimization """
 	profiler = ProfilerData(PROFILER_SOURCE)
-	a = get_target_problem_files(profiler)
+	a = get_problem_files(profiler, ".*arbiter.*")
 	b = get_target_solve_attempt_arguments()
 	balances = list(map(lambda x: [x], get_abc_argument_flag_combinations("b", ABC_OPTIMIZATION_ARGUMENTS["b"], 3)))
 	execute_optimizations_on_solutions(a, b, balances, timeout=60)
