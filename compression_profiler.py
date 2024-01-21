@@ -184,7 +184,8 @@ def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str]
 
 def run_shell_command(cmd: str, timeout_seconds: float | None) -> subprocess.Popen[bytes] | None:
 	""" Runs linux shell command with given timeout in seconds.
-		No timeout is indicated with None."""
+		No timeout is indicated with None. \n
+		Returns process result or None on timeout. """
 	# Runs the given shell command in terminal, timeout in seconds
 	try:
 		p = subprocess.Popen(cmd, start_new_session=True, shell=True, stdout=subprocess.PIPE)
@@ -476,11 +477,16 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 		stats: dict | None = None
 		if result and result.stdout:
 			output = result.stdout.read().decode()
-			stats = parse_aig_read_stats_output(output)
+			stats = parse_aig_read_stats_output(output, True)
 		
 		if not result:
 			tqdm.write("Timed out optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
 
+		# TODO: Check if optimization crashed
+		if result and not stats:
+			# That means we did not time out, but ABC gave an error
+			tqdm.write("ABC command crashed on: \n{}".format(command))
+		
 		# If we retry optimization, update previous one. Otherwise, append it
 		if previous_optimize_attempt:
 			previous_optimize_attempt["command_used"] = command
@@ -669,7 +675,7 @@ def get_range_of_numbers(minimum: int, maximum: int, steps: int) -> list[int]:
 	nums = sorted(list(set([minimum+round(step_size*i) for i in range(steps)])))
 	return nums
 
-def get_parameter_flag_variations(flag: str, mutate: int) -> list[str]:
+def get_parameter_flag_variations(flag: str, mutate: int, exponential: bool = False) -> list[str]:
 	""" Gets variations of a single ABC optimization parameter flag. 
 		Mutate indicates how many numbers requested for lower and higher flag values.
 		Example: flag = '-N #8>=4<=16', mutate = 3
@@ -689,18 +695,23 @@ def get_parameter_flag_variations(flag: str, mutate: int) -> list[str]:
 		nums.extend(get_range_of_numbers(default, maximum, mutate))
 	else:
 		for i in range(mutate):
-			nums.append(max(1, 2 * max(nums)))
+			if exponential:
+				# Add exponential -> 10, 100, 10000, 100000000...
+				nums.append(max(10, max(nums))**2)
+			else:
+				# Add double -> 2, 4, 8, 16, 32, 64...
+				nums.append(max(1, 2 * max(nums)))
 
 	nums = sorted(list(set(nums))) # Remove duplicates and sorts for convenience
 	return ["{} {}".format(base_flag, x) for x in nums]
 
-def get_abc_argument_flag_combinations(argument_base: str, flags: list[str], mutate: int) -> list[str]:
+def get_abc_argument_flag_combinations(argument_base: str, flags: list[str], mutate: int, exponential: bool = False) -> list[str]:
 	""" Gets variations of a single ABC optimization argument.\n
 		Argument base example: 'b'\n
 		Flags example: ['-l', '-d', '-s']"""
 	if not flags: return [argument_base]
 
-	flags_variations: list[list[str]] = [get_parameter_flag_variations(flag, mutate) for flag in flags]
+	flags_variations: list[list[str]] = [get_parameter_flag_variations(flag, mutate, exponential) for flag in flags]
 	
 	combos = flags_variations[0]
 	for flag_variations in flags_variations[1:]:
@@ -744,6 +755,7 @@ def get_target_problem_files(profiler: ProfilerData) -> list[dict]:
 def get_target_solve_attempt_arguments() -> list[list[str]]:
 	return get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
 
+# Test 1: Compare rw and drw optimizations performance
 def solve_for_test_1():
 	profiler = ProfilerData(PROFILER_SOURCE)
 	a = get_target_problem_files(profiler)
@@ -823,6 +835,7 @@ def show_test_1(profiler: ProfilerData, n: int = 5):
 	plt.xticks(rotation=45)
 	plt.show()
 
+# Test 2: Compare performance of rf and drf optimizations
 def solve_for_test_2():
 	profiler = ProfilerData(PROFILER_SOURCE)
 	a = get_target_problem_files(profiler)
