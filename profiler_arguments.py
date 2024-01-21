@@ -95,7 +95,7 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 		"-b",			# toggle internal balancing [default = no]
 	],
 	"rs": [				# performs technology-independent restructuring of the AIG
-		"-K #8>=4<=16",	# the max cut size (4 <= num <= 16) [default = 8]
+		"-K #8>=5<=15",	# the max cut size (4 <= num <= 16) [default = 8]					# Inconsistency between description and acual limit <16 / <=16
 		"-N #1>=0<=3",	# the max number of nodes to add (0 <= num <= 3) [default = 1]
 		# "-M #1>=0",	# the min number of nodes saved after one step (0 <= num) [default = 1]	// Introduced in newer abc commit
 		"-F #0>=0",		# the number of fanout levels for ODC computation [default = 0]
