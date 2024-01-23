@@ -955,7 +955,55 @@ def get_all_abc_opt_arguments(mutate: int) -> list[str]:
 # 			pass
 
 def get_target_problem_files(profiler: ProfilerData) -> list[dict]:
-	return get_problem_files(profiler, "full_arbiter_[0-9]")
+	small = [
+		"ActionConverter",	# AIG size: 8
+		"amba_decomposed_arbiter_2",	# AIG size: 70
+		"amba_decomposed_arbiter_3",	# AIG size: 300
+		"amba_decomposed_decode",	# AIG size: 6
+		"arbiter_with_buffer",	# AIG size: 1
+		"Automata",	# AIG size: 70
+		"Automata32S",	# AIG size: 110
+		"Cockpitboard",	# AIG size: 15
+		"detector",	# AIG size: 50
+		"EnemeyModule",	# AIG size: 7
+		"EscalatorBidirectional",	# AIG size: 140
+		"EscalatorBidirectionalInit",	# AIG size: 150
+		"full_arbiter",	# AIG size: 150
+		"full_arbiter_2",	# AIG size: 50
+		"full_arbiter_3",	# AIG size: 300
+		"Gamelogic",	# AIG size: 80
+		"GamemodeChooser",	# AIG size: 100
+		"lilydemo10",	# AIG size: 7
+		"lilydemo17",	# AIG size: 100
+		"loadcomp3",	# AIG size: 200
+		"loadfull2",	# AIG size: 50
+		"ltl2dba_alpha",	# AIG size: 10
+		"ltl2dba_beta",	# AIG size: 140
+		"ltl2dba01",	# AIG size: 10
+		"MusicAppFeedback",	# AIG size: 30
+		"OneCounter",	# AIG size: 500
+		"prioritized_arbiter",	# AIG size: 30
+		"Scoreboard",	# AIG size: 10
+		"Sensor",	# AIG size: 300
+		"simple_arbiter",	# AIG size: 30
+		"Zoo0",	# AIG size: 20
+	]
+	# big = [
+	# 	"full_arbiter_4", #AIG size: 1000
+	# 	"full_arbiter_8", #AIG size: 60000
+	# ]
+	targets = []
+	for wanted in small:
+		for problem_file in profiler.data["problem_files"]:
+			source = Path(problem_file["source"])
+			current = source.name.removesuffix("".join(source.suffixes))
+			if current == wanted:
+				targets.append(problem_file)
+				break
+
+	print("Selected: {} out of {} wanted problem files".format(len(targets), len(small)))
+	return targets
+	# return get_problem_files(profiler, "full_arbiter_[0-9]")
 def get_target_solve_attempt_arguments() -> list[list[str]]:
 	return get_knor_arguments_combinations(KNOR_ARGS, OINK_SOLVER_ARGS)
 

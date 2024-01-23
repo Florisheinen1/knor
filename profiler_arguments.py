@@ -75,7 +75,7 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 		"-z",			# toggle using zero-cost replacements [default = no]
 	],
 	"drw": [			# performs combinational AIG rewriting
-		"-C #8>=1<=100000",		# the max number of cuts at a node [default = 8]
+		"-C #8>=1<=500",		# the max number of cuts at a node [default = 8]
 		"-N #5>=1",		# the max number of subgraphs tried [default = 5]
 		# "-M #1>=0",	# the min number of nodes saved after one step (0 <= num) [default = 1]	// This is introduced in a newer commit of ABC
 		"-l",			# toggle preserving the number of levels [default = no]
