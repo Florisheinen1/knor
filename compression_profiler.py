@@ -14,6 +14,7 @@ import seaborn as sns
 from profiler_arguments import *
 from tqdm import tqdm
 import threading
+import signal
 
 ABC_BINARY = Path("build/_deps/abc-build/abc")
 ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
@@ -25,30 +26,61 @@ PROBLEM_FILES_FOLDER = Path("examples")
 
 PROFILER_SOURCE = Path("profiler.json")
 
+AIG_PARSE_TIMEOUT_SECONDS = 20 # seconds
+
+# Threads used for executing optimizations in parralell
+THREAD_COUNT = 3
+
+# To ensure the user does not stop the program during a critical part of the code,
+# KeyboardInterrupt exceptions will be handled through the following event flag
+KEYBOARD_INTERRUPT_HAS_BEEN_CALLED: threading.Event = threading.Event()
+def keyboard_interrupt_handler(signum, frame):
+	global KEYBOARD_INTERRUPT_HAS_BEEN_CALLED
+	KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.set()
+signal.signal(signal.SIGINT, keyboard_interrupt_handler)
+
 class SolveResult(Enum):
 	TIMED_OUT = 1
 	UNREALIZABLE = 2
 	SOLVED = 3
 	CRASHED = 4
 
+class ShellCommandResult(Enum):
+	SUCCESS = 1
+	TIMEOUT = 2
+	INTERRUPTED = 3
+
+class VerbosityLevel(Enum):
+	OFF = 1
+	ERROR = 2
+	WARNING = 3
+	INFO = 4
+
 class ProfilerData:
 	def __init__(self, source: Path):
 		self.source: Path = source
 		if source.is_file():
 			with open(source, "r") as file:
+				tqdm.write("Loading profiler data from '{}'... ".format(source), end="")
+				print(flush=True, end="")
+
 				self.data = json.load(file)
-				print("Loaded profiler data from '{}'".format(source))
+				tqdm.write("Done!")
 		else:
 			self.data = { "problem_files": [] }
-			print("Created new profiler data")
+			tqdm.write("Created new profiler data")
 			self.save()
 
 	# Saves current data to source file
-	def save(self):
-		print("Saving profiler data. Do not quit... ", end="", flush=True)
+	def save(self, verbosity_level=VerbosityLevel.WARNING):
+		if verbosity_level.value >= VerbosityLevel.WARNING.value:
+			tqdm.write("WARNING: Saving profiler data. Do not quit... ", end="")
+			print(flush=True, end="")
 		with open(self.source, 'w') as file:
 			json.dump(self.data, file, indent=3)
-		print("Saved results in '{}'".format(self.source))
+		
+		if verbosity_level.value >= VerbosityLevel.WARNING.value:
+			tqdm.write("Saved results in '{}'".format(self.source))
 
 # ====================== Plotters ======================== #
 
@@ -117,9 +149,6 @@ def plot_repetition_minimization_results():
 	figure = sns.catplot(data=data, col="head", x="repetition", y="gain", hue="tail", kind="boxen")
 	plt.show()
 
-def collect_cleanup_data(problem_files: list[dict], solve_attempt_args: list[list[str]]) -> dict:
-	cleanup_data = {"head"}
-
 
 # =========================== Solvers ================================ #
 
@@ -183,20 +212,42 @@ def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str]
 		# Otherwise, we should not try again
 		return False
 
-def run_shell_command(cmd: str, timeout_seconds: float | None) -> subprocess.Popen[bytes] | None:
-	""" Runs linux shell command with given timeout in seconds.
-		No timeout is indicated with None. \n
-		Returns process result or None on timeout. """
-	# Runs the given shell command in terminal, timeout in seconds
-	try:
-		p = subprocess.Popen(cmd, start_new_session=True, shell=True, stdout=subprocess.PIPE)
-		p.wait(timeout=timeout_seconds)
-		return p
-	except subprocess.TimeoutExpired:
-		os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-		return None
+def run_shell_command(cmd: str, timeout_seconds: float | None, allow_keyboard_interrupts: bool) -> tuple[ShellCommandResult, subprocess.Popen[bytes] | None]:
+	""" Runs linux shell command with given timeout in seconds.\n
+		If allow_keyboard_interrupts is False, function will block untill command finished or timed out.\n
+		No timeout is indicated with None.\n
+		Do only set allow_keyboard_interrupts to false if a timeout has been specified!\n
+		Returns the ShellCommandResult type with corresponding value."""
+	# Run the given shell command in terminal
+	process: subprocess.Popen[bytes] = subprocess.Popen(cmd, start_new_session=True, shell=True, stdout=subprocess.PIPE)
+	
+	# Record when we started the command
+	time_started = time.time()
 
-def parse_aig_read_stats_output(cmd_output: str, verbose: bool=False) -> dict | None:
+	while True:
+		# Check if we have a return code yet
+		return_code = process.poll()
+
+		# If process finished, return the result
+		if return_code is not None:
+			return ShellCommandResult.SUCCESS, process
+		
+		# Test if we timed out
+		is_timed_out = time.time() - time_started > timeout_seconds if timeout_seconds is not None else False
+		is_interrupted = KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set() if allow_keyboard_interrupts else False
+
+		# If we reached the timeout time OR keyboard interrupt has been signalled
+		if is_timed_out or is_interrupted:
+			# Kill the process and return None
+			os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+			result_type = ShellCommandResult.TIMEOUT if is_timed_out else ShellCommandResult.INTERRUPTED
+			return result_type, None
+		
+		# Otherwise, we just need to wait a tiny bit longer
+		time.sleep(0.01)
+
+
+def parse_aig_read_stats_output(cmd_output: str, verbosity_level: VerbosityLevel=VerbosityLevel.ERROR) -> dict | None:
 	""" Parses AIG stats from given output of a shell command.\n
 	 	Looks for the first ABC 'print_stats' output and returns tuple of:
 		- Number of AND gates,
@@ -218,25 +269,34 @@ def parse_aig_read_stats_output(cmd_output: str, verbose: bool=False) -> dict | 
 			"inputs": inputs,
 			"outputs": outputs
 		}
-	except:
-		if verbose:
-			tqdm.write("Things that went wrong parsing: \n")
+	except (IndexError, ValueError):
+		if verbosity_level.value >= VerbosityLevel.ERROR.value:
+			tqdm.write("Failed to parse AIG output:")
 			tqdm.write(cmd_output)
-		else:
-			tqdm.write("Failed to parse aiger output.")
+		return None
 
 def get_aig_stats_from_file(file: Path) -> dict | None:
-	""" Reads given AIG file with ABC and returns its stats."""
+	""" Reads given AIG file with ABC and returns its stats.\n
+		Returns None if failed to parse AIG.\n
+		Cannot be interrupted by KeyboardInterrupts. """
 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
-	command_result = run_shell_command(abc_read_cmd, 10)
-	if not command_result or not command_result.stdout: return None
-	cmd_output = command_result.stdout.read().decode()
-	return parse_aig_read_stats_output(cmd_output)
+	_, result = run_shell_command(abc_read_cmd, AIG_PARSE_TIMEOUT_SECONDS, allow_keyboard_interrupts=False)
+	
+	if result is None:
+		tqdm.write("ERROR: Reading AIG timed out. Please increase AIG_PARSE_TIMEOUT_SECONDS.")
+		return None
+	
+	if not result.stdout:
+		tqdm.write("ERROR: Failed to get STDOUT of AIG parse command.")
+		return None
+
+	shell_output = result.stdout.read().decode()
+	return parse_aig_read_stats_output(shell_output)
 
 def solve_problem_files(
 		problem_files: list[dict],
 		knor_argument_combos: list[list[str]],
-		verbose=True, # TODO: Implement this
+		verbosity_level=VerbosityLevel.ERROR,
 		solve_timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND):
 	""" Solves each gven problem file with all given Knor argument combinations.
 		Given timeout applies to the timeout of each solve attempt."""
@@ -248,12 +308,14 @@ def solve_problem_files(
 	for problem_file in tqdm(problem_files, desc="problem_file", position=0, leave=False):
 		problem_file_source = Path(problem_file["source"])
 		if not problem_file_source.is_file():
-			tqdm.write("Error: problem file '{}' not available".format(problem_file_source))
-			#TODO: Check if this works
+			if verbosity_level.value >= VerbosityLevel.ERROR.value:
+				tqdm.write("Error: problem file '{}' not available".format(problem_file_source))
+			continue
 
 		# Skip this problem file if we already know it is unrealizable
 		if problem_file["known_unrealizable"]:
-			tqdm.write("Skipping '{}' because its unrealizable".format(problem_file_source))
+			if verbosity_level.value >= VerbosityLevel.INFO.value:
+				tqdm.write("INFO: Skipping '{}' because its unrealizable".format(problem_file_source))
 			continue
 		
 		# Prepare the specific output folder for this problem file
@@ -272,27 +334,39 @@ def solve_problem_files(
 			solve_command = "./{} {} {} > {}".format(KNOR_BINARY, problem_file_source, " ".join(knor_argument_combo), output_file)
 
 			command_start = time.time()
-			try:
-				command_result = run_shell_command(solve_command, solve_timeout)
-			except KeyboardInterrupt:
-				tqdm.write("Aborted solving '{}' with {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, time.time() - command_start))
-				return
+			command_status, command_result = run_shell_command(solve_command, solve_timeout, True)
 			command_time = time.time() - command_start
 
 			solution_data: dict | None = None
 			solve_result = SolveResult.SOLVED
-			if not command_result:
+
+			if command_status == ShellCommandResult.INTERRUPTED:
+				tqdm.write("Aborted solving '{}' with {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, time.time() - command_start))
+				return
+
+			elif command_status == ShellCommandResult.TIMEOUT:
 				tqdm.write("Timeout for solving '{}' with args{} in: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
 				solve_result = SolveResult.TIMED_OUT
+
+			elif command_result is None:
+				tqdm.write("Error: Should have gotten command result, but received None")
+				return
+
 			elif command_result.returncode == 10:
 				# Successfully solved problem, so read solution AIG data
-				tqdm.write("Solved '{}' with args {} in {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
+				if verbosity_level.value >= VerbosityLevel.INFO.value:
+					tqdm.write("Solved '{}' with args {} in {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
 				solution_data = get_aig_stats_from_file(output_file)
+				if not solution_data and verbosity_level.value >= VerbosityLevel.ERROR.value:
+					tqdm.write("Error: Successfully solved '{}' with args {} into '{}' but failed to parse AIG data".format(problem_file_source, knor_argument_combo, output_file))
+				
 			elif command_result.returncode == 20:
-				tqdm.write("Unrealizable to solve '{}'. Took: {:.2f}s".format(problem_file_source, command_time))
+				if verbosity_level.value >= VerbosityLevel.INFO.value:
+					tqdm.write("Unrealizable to solve '{}'. Took: {:.2f}s".format(problem_file_source, command_time))
 				solve_result = SolveResult.UNREALIZABLE
 			else:
-				tqdm.write("Crashed from solving '{}' with args {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
+				if verbosity_level.value >= VerbosityLevel.WARNING.value:
+					tqdm.write("Warning: Crashed from solving '{}' with args {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
 				solve_result = SolveResult.CRASHED
 
 			# === Store the new result
@@ -322,7 +396,8 @@ def solve_problem_files(
 					"optimizations": []
 				})
 			else:
-				tqdm.write("Updated previous solve attempt of: '{}' with args: {}".format(problem_file_source, knor_argument_combo))
+				if verbosity_level.value >= VerbosityLevel.INFO.value:
+					tqdm.write("Updated previous solve attempt of: '{}' with args: {}".format(problem_file_source, knor_argument_combo))
 				# Retry attempt, so update previous attempt
 				previous_solve_attempt["data"] = solution_data
 
@@ -416,7 +491,12 @@ def write_comment_to_aig_file(aig_file: Path, comment: str):
 		file.write(comment)
 		file.write("\n")
 
-def execute_optimization_on_solution(solution: dict, arguments: list[str], output_folder: Path, optimize_timeout: float=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND):
+def execute_optimization_on_solution(
+		solution: dict,
+		arguments: list[str],
+		output_folder: Path,
+		optimize_timeout: float=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND,
+		verbosity_level: VerbosityLevel = VerbosityLevel.WARNING):
 	""" Executes the optimizations of given arguments if they have not been done before on the given solution.
 		Ensures intermediate optimization results are stored as well for reuse later.
 		Stores results in given output folder."""
@@ -427,6 +507,9 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 
 	# Go through each argument and try to optimize the solution with the argument chain up till then 
 	for argument in arguments:
+		# Return when user has interrupted
+		if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+		
 		arguments_build_up.append(argument)
 
 		# Find previous optimization attempt for these built-up arguments chain
@@ -435,12 +518,12 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 		# If previous optimization attempt exists, only continue if it makes sense to try it again
 		if previous_optimize_attempt:
 			# If previous optimization was successful, we can go to the next argument
-			if not previous_optimize_attempt["timed_out"]:
-				# tqdm.write("Already completed optimization {} for solution {}".format(arguments_build_up, solution["args_used"]))
-				continue
+			if not previous_optimize_attempt["timed_out"]: continue
+
 			# If previous attempt timed out and we do not have more time than then, this optimization cannot be done
 			if optimize_timeout <= previous_optimize_attempt["optimize_time_python"]:
-				tqdm.write("Cannot improve timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]))
+				if verbosity_level.value >= VerbosityLevel.INFO.value:
+					tqdm.write("Cannot improve timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]))
 				return
 
 		# The file that needs to be optimized
@@ -457,36 +540,43 @@ def execute_optimization_on_solution(solution: dict, arguments: list[str], outpu
 
 			# If we failed to find the origin optimization, return
 			if not origin_optimization:
-				tqdm.write("Failed to find optimization base for {} ({}) on solution {}".format(arguments_build_up, origin_arguments, solution["args_used"]))
+				if verbosity_level.value >= VerbosityLevel.ERROR.value:
+					tqdm.write("Error: Failed to find optimization base for {} ({}) on solution {}".format(arguments_build_up, origin_arguments, solution["args_used"]))
 				return
 			
 			source_file = Path(origin_optimization["output_file"])
 
 		# Check if source file actually still exists
 		if not source_file.exists():
-			tqdm.write("Source file missing: '{}'".format(source_file))
+			if verbosity_level.value >= VerbosityLevel.ERROR.value:
+				tqdm.write("Error: Source file missing: '{}'".format(source_file))
 			return
 
 		output_file = output_folder / "m{}.aig".format(new_optimization_id)
 		command = create_abc_optimization_command(source_file, [argument], output_file)
 
 		optimize_start = time.time()
-		result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND)
+		result_type, result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND, False)
 		optimize_time = time.time() - optimize_start
+
+		if result_type == ShellCommandResult.TIMEOUT:
+			# We can no longer continue this optimization path, so return
+			if verbosity_level.value >= VerbosityLevel.WARNING.value:
+				tqdm.write("Warning: Timed out optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
+			return
 		
-		# Being unable to read the AIG data indicates an error occurred
 		stats: dict | None = None
 		if result and result.stdout:
 			output = result.stdout.read().decode()
-			stats = parse_aig_read_stats_output(output, True)
+			stats = parse_aig_read_stats_output(output, verbosity_level=VerbosityLevel.ERROR)
+			if not stats and verbosity_level.value >= VerbosityLevel.ERROR.value:
+				# That means we did not time out, but ABC gave an error
+				tqdm.write("ABC command crashed on: \n{}".format(command))
 		
 		if not result:
-			tqdm.write("Timed out optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
-
-		# TODO: Check if optimization crashed
-		if result and not stats:
-			# That means we did not time out, but ABC gave an error
-			tqdm.write("ABC command crashed on: \n{}".format(command))
+			if verbosity_level.value >= VerbosityLevel.ERROR.value:
+				tqdm.write("Error: Did not get result from optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
+				return
 		
 		# If we retry optimization, update previous one. Otherwise, append it
 		if previous_optimize_attempt:
@@ -526,6 +616,8 @@ def execute_optimizations_on_solutions(
 		n_threads: int = 1):
 	""" Optimizes the given solutions (or all if "None") of the given problem files with the given optimization arguments.\n
 		Performs optimizations on different threads on solution-level. """
+	global KEYBOARD_INTERRUPT_HAS_BEEN_CALLED
+
 	if n_threads < 1: raise Exception("Cannot perform optimization on no threads.")
 
 	# Ensure base folder for optimization results exists
@@ -582,8 +674,6 @@ def execute_optimizations_on_solutions(
 		else:
 			# Spawn n_threads amount of thread workers that will perform the optimizations
 			worker_threads: list[threading.Thread] = []
-			run_event: threading.Event = threading.Event()
-			run_event.set()
 
 			# Workers pick a solution to perform all given optimization commands on, and then insert it into the "finished" list
 			remaining_unoptimized_solutions: list[dict] = [solution for solution in target_solutions] # Clone to not mess up the profiler's list
@@ -596,8 +686,7 @@ def execute_optimizations_on_solutions(
 			progress_thread = threading.Thread(target=status_worker_function, args=(
 				finished_optimized_solutions,
 				len(target_solutions),
-				1,
-				run_event
+				1
 			))
 			progress_thread.start()
 
@@ -609,7 +698,6 @@ def execute_optimizations_on_solutions(
 					finished_optimized_solutions,
 					finished_list_mutex,
 					optimization_argument_combos,
-					run_event,
 					problem_folder,
 					"worker_{}".format(i),
 					2 + i
@@ -617,66 +705,53 @@ def execute_optimizations_on_solutions(
 				worker_i.start()
 				worker_threads.append(worker_i)
 
-			stopped_because_of_interrupt = False
-			try:
-				# Join worker threads
-				for worker in worker_threads:
-					worker.join()
-				# When workers are done, stop the 'run_event' and join the progress thread as well
-				run_event.clear()
-				progress_thread.join()
-			except KeyboardInterrupt:
-				# If keyboard was interrupted, update the flag
-				stopped_because_of_interrupt = True
-			finally:
-				# In any case, whatever exception, stop the 'run_event'
-				run_event.clear()
-				# And join the worker threads
-				for worker in worker_threads:
-					worker.join()
-				# And also the progress thread
-				progress_thread.join()
-				
-				if stopped_because_of_interrupt: tqdm.write("Aborted by user")
-					
-			# If we did all the thingies for this problem file, stop continuing if user has interrupted
-			if stopped_because_of_interrupt: return
+			# Join worker threads. Will happen if they are done or if they see KeyboardInterrupt has happened
+			for worker in worker_threads:
+				worker.join()
+			progress_thread.join()
+
+			# If the threads stopped becasuse of the KeyboardInterrupt signal, return
+			if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set():
+				tqdm.write("Abborted by user.")
+				return
 
 def status_worker_function(
 		finished_solutions: list[dict],
 		total_solutions: int,
 		tqdm_bar_position: int,
-		run_event: threading.Event
 		):
 	""" Displays the progress bar of solutions on which all optimizations have been performed.\n
-		Runs until run_event is cleared or all optimiztions have been performed on all solutions. 
+		Runs until KeyboardInterrupt happens or all optimiztions have been performed on all solutions. 
 		Meant for separate thread for when multiple worker threads are used for optimizing. """
-	with tqdm(total=total_solutions, mininterval=1, position=tqdm_bar_position, desc="solutions", leave=False) as pbar:
-		while run_event.is_set():
+	global KEYBOARD_INTERRUPT_HAS_BEEN_CALLED
+
+	with tqdm(total=total_solutions, mininterval=0.3, position=tqdm_bar_position, desc="solutions", leave=False) as pbar:
+		while not KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set():
 			actual_progress = len(finished_solutions)
 			bar_progress = pbar.n
 			new_progress = actual_progress - bar_progress
 			pbar.update(new_progress)
-			time.sleep(0.5)
 			if actual_progress == total_solutions: break # We have finished our progress, so we can stop
+			time.sleep(0.5)
 
-# Define what the workers should do
 def optimize_worker_function(
 		unsolved_solutions: list[dict],
 		unsolved_list_mutex: threading.Lock,
 		finished_solutions: list[dict],
 		finished_list_mutex: threading.Lock,
 		optimization_argument_combos: list[list[str]],
-		run_event: threading.Event,
 		problem_folder: Path,
 		tqdm_bar_title: str,
 		tqdm_bar_position: int
 		):
 	""" Picks solution from unsolved_solutions and performs all optimizations on it.\n
 		If all optimizations have been done on picked solution, solution is appended to finished_solutions. \n
-	 	Meant as function for optimizations worker thread. Runs until run_event is cleared
-		or all optimizations have been performed. """
-	while run_event.is_set():
+	 	Meant as function for optimizations worker thread. Runs until
+			* KeyboardInterrupt has been signalled
+			* or all optimizations have been performed. """
+	global KEYBOARD_INTERRUPT_HAS_BEEN_CALLED
+
+	while not KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set():
 		# First, pick the first solution to perform optimizations on:
 		with unsolved_list_mutex:
 			if not unsolved_solutions: return # There is no solution we can optimize left
@@ -687,9 +762,9 @@ def optimize_worker_function(
 		solution_output_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), arguments_used_for_solution))
 		if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
 
-		for argument_combo in tqdm(optimization_argument_combos, desc=tqdm_bar_title, position=tqdm_bar_position, leave=False):
-			# Check again if we still need to be running
-			if not run_event.is_set(): break
+		for argument_combo in tqdm(optimization_argument_combos, mininterval=0.3, desc=tqdm_bar_title, position=tqdm_bar_position, leave=False):
+			# If KeyboardInterrupt has been singalled, stop
+			if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): break
 
 			# This argument combo needs to be applied on the picked solution
 			execute_optimization_on_solution(target_solution, argument_combo, solution_output_folder)
@@ -991,7 +1066,7 @@ def optimize_for_test_1():
 	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
 	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
 	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
-	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
 	profiler.save()
 
 def show_test_1(profiler: ProfilerData, n: int = 5):
@@ -1071,30 +1146,8 @@ def optimize_for_test_2():
 	rw_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
 	drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
 	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
-	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
 	profiler.save()
-
-def test_optimize_for_test_2():
-	""" See if refactor (rf) or dag-aware refactor (drf) is more effective """
-	profiler = ProfilerData(PROFILER_SOURCE)
-	a = get_target_problem_files(profiler)
-	b = get_target_solve_attempt_arguments()
-	rw_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
-	drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
-	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
-	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
-	tqdm.write("Time to save now... for testing purposes though, not really")
-
-def test_optimize_for_test_2_parralell():
-	""" See if refactor (rf) or dag-aware refactor (drf) is more effective """
-	profiler = ProfilerData(PROFILER_SOURCE)
-	a = get_target_problem_files(profiler)
-	b = get_target_solve_attempt_arguments()
-	rw_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
-	drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
-	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
-	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=3)
-	tqdm.write("Time to save now... for testing purposes though, not really")
 
 def show_test_2(profiler: ProfilerData, n: int = 5):
 	""" Plots the top n best average rf and top n best average drf """
@@ -1176,7 +1229,7 @@ def optimize_for_test_3():
 		opt_args.extend(get_abc_argument_flag_combinations(arg, ABC_OPTIMIZATION_ARGUMENTS[arg], 3))
 	opt_args = list(map(lambda x: [x], opt_args))
 	
-	execute_optimizations_on_solutions(a, b, opt_args, timeout=60)
+	execute_optimizations_on_solutions(a, b, opt_args, timeout=60, n_threads=THREAD_COUNT)
 	profiler.save()
 
 def show_test_3(profiler: ProfilerData):
@@ -1196,7 +1249,7 @@ def optimize_for_test_4():
 	a = get_problem_files(profiler, ".*arbiter.*")
 	b = get_target_solve_attempt_arguments()
 	balances = list(map(lambda x: [x], get_abc_argument_flag_combinations("b", ABC_OPTIMIZATION_ARGUMENTS["b"], 3)))
-	execute_optimizations_on_solutions(a, b, balances, timeout=60)
+	execute_optimizations_on_solutions(a, b, balances, timeout=60, n_threads=THREAD_COUNT)
 	profiler.save()
 
 def show_test_4(profiler: ProfilerData):
@@ -1217,7 +1270,7 @@ def optimize_for_test_5():
 	b = get_target_solve_attempt_arguments()
 	extreme_drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3, True)
 	joint_args = list(map(lambda x: [x], extreme_drw_variants))
-	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
 	profiler.save()
 
 def show_test_5(profiler: ProfilerData):
@@ -1238,7 +1291,7 @@ def optimize_for_test_6():
 	b = get_target_solve_attempt_arguments()
 	extreme_drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3, True)
 	joint_args = list(map(lambda x: [x], extreme_drw_variants))
-	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
 	profiler.save()
 
 def show_test_6(profiler: ProfilerData):
@@ -1364,7 +1417,7 @@ def check_problem_file_structure_correctness(problem_files: list[dict]):
 			for solve_attempt in problem_file["solve_attempts"]:
 				check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
 
-	print("Done")
+	tqdm.write("Done")
 
 def check_profiler_structure():
 	profiler = ProfilerData(PROFILER_SOURCE)
@@ -1406,4 +1459,3 @@ def fix_missing_attributes(profiler: ProfilerData):
 					if not stats: print("Should have data, but failed to get stats in optimization: {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
 					optimization["data"] = stats
 					tqdm.write("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
-		
