@@ -638,7 +638,9 @@ def execute_optimizations_on_solutions(
 				progress_thread.join()
 				
 				if stopped_because_of_interrupt: tqdm.write("Aborted by user")
-
+					
+			# If we did all the thingies for this problem file, stop continuing if user has interrupted
+			if stopped_because_of_interrupt: return
 
 def status_worker_function(
 		finished_solutions: list[dict],
