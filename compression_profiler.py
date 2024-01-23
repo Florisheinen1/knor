@@ -648,6 +648,9 @@ def status_worker_function(
 		tqdm_bar_position: int,
 		run_event: threading.Event
 		):
+	""" Displays the progress bar of solutions on which all optimizations have been performed.\n
+		Runs until run_event is cleared or all optimiztions have been performed on all solutions. 
+		Meant for separate thread for when multiple worker threads are used for optimizing. """
 	with tqdm(total=total_solutions, mininterval=1, position=tqdm_bar_position, desc="solutions", leave=False) as pbar:
 		while run_event.is_set():
 			actual_progress = len(finished_solutions)
@@ -655,8 +658,7 @@ def status_worker_function(
 			new_progress = actual_progress - bar_progress
 			pbar.update(new_progress)
 			time.sleep(0.5)
-			if actual_progress == total_solutions: break # We have 
-
+			if actual_progress == total_solutions: break # We have finished our progress, so we can stop
 
 # Define what the workers should do
 def optimize_worker_function(
@@ -670,6 +672,10 @@ def optimize_worker_function(
 		tqdm_bar_title: str,
 		tqdm_bar_position: int
 		):
+	""" Picks solution from unsolved_solutions and performs all optimizations on it.\n
+		If all optimizations have been done on picked solution, solution is appended to finished_solutions. \n
+	 	Meant as function for optimizations worker thread. Runs until run_event is cleared
+		or all optimizations have been performed. """
 	while run_event.is_set():
 		# First, pick the first solution to perform optimizations on:
 		with unsolved_list_mutex:
