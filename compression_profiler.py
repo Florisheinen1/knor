@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from profiler_arguments import *
 from tqdm import tqdm
+import threading
 
 ABC_BINARY = Path("build/_deps/abc-build/abc")
 ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
@@ -521,8 +522,12 @@ def execute_optimizations_on_solutions(
 		solve_argument_combos: list[list[str]] | None,
 		optimization_argument_combos: list[list[str]],
 		verbose=False,
-		timeout=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND):
-	""" Optimizes the given solutions (or all if "None") of the given problem files with the given optimization arguments"""
+		timeout=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND,
+		n_threads: int = 1):
+	""" Optimizes the given solutions (or all if "None") of the given problem files with the given optimization arguments.\n
+		Performs optimizations on different threads on solution-level. """
+	if n_threads < 1: raise Exception("Cannot perform optimization on no threads.")
+
 	# Ensure base folder for optimization results exists
 	if not MINIMIZED_AIG_FOLDER.is_dir(): MINIMIZED_AIG_FOLDER.mkdir()
 	
@@ -561,18 +566,134 @@ def execute_optimizations_on_solutions(
 				target_solutions.append(matching_solve_attempt)
 
 		# Then apply optimizations to target solutions
-		for target_solution in tqdm(target_solutions, desc="solution", position=1, leave=False):
-			# Ensure solution specific output folder exists
-			arguments_used_for_solution = target_solution["args_used"]
-			solution_output_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), arguments_used_for_solution))
-			if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
+		if n_threads == 1:
+			for target_solution in tqdm(target_solutions, desc="solution", position=1, leave=False):
+				# Ensure solution specific output folder exists
+				arguments_used_for_solution = target_solution["args_used"]
+				solution_output_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), arguments_used_for_solution))
+				if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
 
-			for optimization_argument_combo in tqdm(optimization_argument_combos, desc="optimization", position=2, leave=False):				
-				try:
-					execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder)
-				except KeyboardInterrupt:
-					tqdm.write("Aborted optimizing '{}' with optimizations {}.".format(target_solution["output_file"], optimization_argument_combo))
-					return
+				for optimization_argument_combo in tqdm(optimization_argument_combos, desc="optimization", position=2, leave=False):				
+					try:
+						execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder)
+					except KeyboardInterrupt:
+						tqdm.write("Aborted optimizing '{}' with optimizations {}.".format(target_solution["output_file"], optimization_argument_combo))
+						return
+		else:
+			# Spawn n_threads amount of thread workers that will perform the optimizations
+			worker_threads: list[threading.Thread] = []
+			run_event: threading.Event = threading.Event()
+			run_event.set()
+
+			# Workers pick a solution to perform all given optimization commands on, and then insert it into the "finished" list
+			remaining_unoptimized_solutions: list[dict] = [solution for solution in target_solutions] # Clone to not mess up the profiler's list
+			remaining_list_mutex: threading.Lock = threading.Lock()
+
+			finished_optimized_solutions: list[dict] = []
+			finished_list_mutex: threading.Lock = threading.Lock()
+
+			# Spawn the thread for just progress bar of solutions
+			progress_thread = threading.Thread(target=status_worker_function, args=(
+				finished_optimized_solutions,
+				len(target_solutions),
+				1,
+				run_event
+			))
+			progress_thread.start()
+
+			# Now spawn the threads
+			for i in range(n_threads):
+				worker_i = threading.Thread(target=optimize_worker_function, args=(
+					remaining_unoptimized_solutions,
+					remaining_list_mutex,
+					finished_optimized_solutions,
+					finished_list_mutex,
+					optimization_argument_combos,
+					run_event,
+					problem_folder,
+					"worker_{}".format(i),
+					2 + i
+					))
+				worker_i.start()
+				worker_threads.append(worker_i)
+
+			stopped_because_of_interrupt = False
+			try:
+				# Join worker threads
+				for worker in worker_threads:
+					worker.join()
+				# When workers are done, stop the 'run_event' and join the progress thread as well
+				run_event.clear()
+				progress_thread.join()
+			except KeyboardInterrupt:
+				# If keyboard was interrupted, update the flag
+				stopped_because_of_interrupt = True
+			finally:
+				# In any case, whatever exception, stop the 'run_event'
+				run_event.clear()
+				# And join the worker threads
+				for worker in worker_threads:
+					worker.join()
+				# And also the progress thread
+				progress_thread.join()
+				
+				if stopped_because_of_interrupt: tqdm.write("Aborted by user")
+
+
+def status_worker_function(
+		finished_solutions: list[dict],
+		total_solutions: int,
+		tqdm_bar_position: int,
+		run_event: threading.Event
+		):
+	with tqdm(total=total_solutions, mininterval=1, position=tqdm_bar_position, desc="solutions", leave=False) as pbar:
+		while run_event.is_set():
+			actual_progress = len(finished_solutions)
+			bar_progress = pbar.n
+			new_progress = actual_progress - bar_progress
+			pbar.update(new_progress)
+			time.sleep(0.5)
+			if actual_progress == total_solutions: break # We have 
+
+
+# Define what the workers should do
+def optimize_worker_function(
+		unsolved_solutions: list[dict],
+		unsolved_list_mutex: threading.Lock,
+		finished_solutions: list[dict],
+		finished_list_mutex: threading.Lock,
+		optimization_argument_combos: list[list[str]],
+		run_event: threading.Event,
+		problem_folder: Path,
+		tqdm_bar_title: str,
+		tqdm_bar_position: int
+		):
+	while run_event.is_set():
+		# First, pick the first solution to perform optimizations on:
+		with unsolved_list_mutex:
+			if not unsolved_solutions: return # There is no solution we can optimize left
+			target_solution: dict = unsolved_solutions.pop(0)
+
+		# Ensure solution specific output folder exists
+		arguments_used_for_solution = target_solution["args_used"]
+		solution_output_folder = problem_folder / "_".join(map(lambda x: x.replace("-",""), arguments_used_for_solution))
+		if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
+
+		for argument_combo in tqdm(optimization_argument_combos, desc=tqdm_bar_title, position=tqdm_bar_position, leave=False):
+			# Check again if we still need to be running
+			if not run_event.is_set(): break
+
+			# This argument combo needs to be applied on the picked solution
+			execute_optimization_on_solution(target_solution, argument_combo, solution_output_folder)
+
+		# Now add the solution we were optimizing to the finished pile
+		with finished_list_mutex:
+			finished_solutions.append(target_solution)
+
+
+# def execute_optimizations_on_solution_on_thread(target_solution: dict, optimization_argument_combos: list[list[str]], solution_output_folder: Path, tqdm_bar_position: int, tqdm_bar_title):
+# 	for argument_combo in tqdm(optimization_argument_combos, desc=tqdm_bar_title, position=tqdm_bar_position, leave=False):
+# 		execute_optimization_on_solution(target_solution, argument_combo, solution_output_folder)
 
 # ======================== Solver initiators ================ #
 
@@ -944,6 +1065,28 @@ def optimize_for_test_2():
 	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
 	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
 	profiler.save()
+
+def test_optimize_for_test_2():
+	""" See if refactor (rf) or dag-aware refactor (drf) is more effective """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	rw_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
+	drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
+	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60)
+	tqdm.write("Time to save now... for testing purposes though, not really")
+
+def test_optimize_for_test_2_parralell():
+	""" See if refactor (rf) or dag-aware refactor (drf) is more effective """
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a = get_target_problem_files(profiler)
+	b = get_target_solve_attempt_arguments()
+	rw_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
+	drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
+	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
+	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=3)
+	tqdm.write("Time to save now... for testing purposes though, not really")
 
 def show_test_2(profiler: ProfilerData, n: int = 5):
 	""" Plots the top n best average rf and top n best average drf """
