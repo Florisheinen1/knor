@@ -1617,13 +1617,8 @@ def do_cluster_stuff():
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
-	# 5. Perform test 3
-	cluster_test_3(profiler)
-	profiler.save()
-	LOG("Performed test 3: duplications!", VerbosityLevel.INFO)
+	# 5 is procrastinated downwards!
 
-	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
-	
 	# 6. Perform test 4
 	cluster_test_4(profiler)
 	profiler.save()
@@ -1642,6 +1637,13 @@ def do_cluster_stuff():
 	cluster_test_6(profiler)
 	profiler.save()
 	LOG("Performed test 6: premade strategies!", VerbosityLevel.INFO)
+
+	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+
+	# 5. Perform test 3
+	cluster_test_3(profiler)
+	profiler.save()
+	LOG("Performed test 3: duplications!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
