@@ -69,10 +69,10 @@ class SolveProblemFileWorth(Enum):
 
 # Indicates how extensive the tests need to be
 class TestSize(Enum):
-	Small = 0			# Few problem files,		1 mutation,  3 repetitions
-	Medium = 1			# Quarter of problem files,	2 mutations, 3 repetitions
-	Big = 2				# Half of problem files, 	3 mutations, 4 repetitions
-	Everything = 3		# All problem files, 		4 mutations, 5 repetitions
+	Small = 1			# Few problem files,		1 mutation,  3 repetitions
+	Medium = 2			# Quarter of problem files,	2 mutations, 3 repetitions
+	Big = 3				# Half of problem files, 	3 mutations, 4 repetitions
+	Everything = 4		# All problem files, 		4 mutations, 5 repetitions
 
 LOG_VERBOSITY_LEVEL = VerbosityLevel.WARNING
 LOG_TO_TQDM = True
@@ -142,59 +142,6 @@ def initialize_problem_files(profiler: ProfilerData):
 				"known_unrealizable": False,
 				"solve_attempts": []
 			})
-
-# # ====================== Plotters ======================== #
-			
-# def calculate_optimization_gain(previous_AND_gate_count: int, new_AND_gate_count: int) -> float:
-# 	""" Calculates percentage of decrease in size, a.k.a. our view of what "gain" is """
-# 	difference = previous_AND_gate_count - new_AND_gate_count
-# 	gain = difference / previous_AND_gate_count
-# 	return gain
-
-# # Returns dictionary collecting exploded results from repetition optimizations
-# def collect_duplication_data(problem_files: list[dict]) -> dict:
-# 	duplication_data = {"head": [], "tail": [], "repetition": [], "gain": []}
-# 	for arg_head in ABC_OPTIMIZATION_ARGUMENTS:
-# 		for arg_tail in ABC_OPTIMIZATION_ARGUMENTS:
-# 			if arg_head == arg_tail: continue
-
-# 			for problem_file in problem_files:
-# 				if problem_file["known_unrealizable"] == True: continue
-
-# 				for solve_attempt in problem_file["solve_attempts"]:
-# 					if solve_attempt["timed_out"] or solve_attempt["crashed"]: continue
-
-# 					AND_count_history = [solve_attempt["data"]["and_gates"]]
-
-# 					for repetition in range(REPETITION_TEST_MAX_REPETITION):
-# 						test = [arg_head] * repetition + [arg_tail]
-# 						optimization = get_optimization_with_args(solve_attempt["optimizations"], test)
-						
-# 						if not optimization: continue
-						
-# 						if optimization["timed_out"]:
-# 							raise Exception("Data not available due to previous timed-out calculation")
-
-# 						previous = AND_count_history[-1]
-# 						current = optimization["data"]["and_gates"]
-# 						AND_count_history.append(current)
-
-# 						gain = 100 * calculate_optimization_gain(previous, current)
-
-# 						duplication_data["head"].append(arg_head)
-# 						duplication_data["tail"].append(arg_tail)
-# 						duplication_data["repetition"].append(repetition)
-# 						duplication_data["gain"].append(gain)
-
-# 	return duplication_data
-
-# # Plots the repetition minimization results into a separate window
-# def plot_repetition_minimization_results():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	sns.set_theme()
-# 	data = collect_duplication_data(profiler.data["problem_files"])
-# 	figure = sns.catplot(data=data, col="head", x="repetition", y="gain", hue="tail", kind="boxen")
-# 	plt.show()
 
 
 # =========================== Solvers ================================ #
@@ -790,20 +737,22 @@ def optimize_worker_function(
 			finished_solutions.append(target_solution)
 
 # ======================== Argument Creators ===================== #
-def get_knor_flag_combinations(knor_synthesize_flags: list[str], knor_solve_flags: list[str], binary_out: bool = True) -> list[list[str]]:
+def get_knor_flag_combinations(test_size: TestSize, binary_out: bool = True) -> list[list[str]]:
 	""" Returns a list of all argument combinations to give to Knor.
 		If binary_out is False, '-a' will be appended instead '-b'."""
+	if test_size == TestSize.Small: return [["--sym"]] # Only with small test sizes, immediately return '--sym'
+
 	# Get all possible combinations of knor args
 	knor_flag_combinations = []
-	for i in range(len(knor_synthesize_flags) + 1):
+	for i in range(len(KNOR_SYNTHESIZE_FLAGS) + 1):
 		l = []
-		for c in itertools.combinations(knor_synthesize_flags, i):
+		for c in itertools.combinations(KNOR_SYNTHESIZE_FLAGS, i):
 			l.append(c)
 		knor_flag_combinations.extend(l)
 
 	all_flag_combinations = []
 	# Now, combine knor synthesize flag combos with every possible knor solve flag
-	for oink_arg in knor_solve_flags:
+	for oink_arg in KNOR_SOLVE_FLAGS:
 		for knor_arg_combo in knor_flag_combinations:
 			new_combo = list(knor_arg_combo)
 			new_combo.append(oink_arg)
@@ -875,35 +824,42 @@ def get_ABC_argument_variations(argument_base: str, flags: dict | None, mutate: 
 	argument_combos = [argument_base] + ["{} {}".format(argument_base, combo) for combo in combos]
 	return argument_combos
 
-def get_all_ABC_optimization_arguments(mutate: int) -> list[str]:
+def get_all_ABC_optimization_arguments(test_size: TestSize) -> list[str]:
 	""" Returns list of all individual ABC optimization commands and their variations. """
+	mutate_level = test_size.value
+
+	target_arguments = list(ABC_OPTIMIZATION_ARGUMENTS.keys())
+	if test_size == TestSize.Small: target_arguments = ["b", "drw", "drf"]
+
 	arguments: list[str] = []
-	for argument in ABC_OPTIMIZATION_ARGUMENTS:
-		arguments.extend(get_ABC_argument_variations(argument, ABC_OPTIMIZATION_ARGUMENTS[argument], mutate))
+	for argument in target_arguments:
+		arguments.extend(get_ABC_argument_variations(argument, ABC_OPTIMIZATION_ARGUMENTS[argument], mutate_level))
 	return arguments
 
-def get_all_ABC_optimization_duos(mutate: int) -> list[list[str]]:
+def get_all_ABC_optimization_duos(test_size: TestSize) -> list[list[str]]:
 	""" Creates pairs of every ABC optimization command. """
 	duos = []
-	all_optimizations = get_all_ABC_optimization_arguments(mutate)
+	all_optimizations = get_all_ABC_optimization_arguments(test_size)
 	for first in all_optimizations:
 		for second in all_optimizations:
 			duo = [first, second]
 			duos.append(duo)
 	return duos
 
-def get_ABC_optimization_duplication_combos(mutate: int, depth: int) -> list[list[str]]:
+def get_ABC_optimization_duplication_combos(test_size: TestSize) -> list[list[str]]:
 	""" Creates a list of optimization argument combos for performing duplication effectiveness tests. 
 		A, BA, BBA, BBBA, B, AB, AAB, AAB, AAAB etc. """
 	duplication_combos: list[list[str]] = []
 
-	all_argument_variations = get_all_ABC_optimization_arguments(mutate)
+	repetition_depth = min(2, test_size.value)
+
+	all_argument_variations = get_all_ABC_optimization_arguments(test_size)
 	for head_of_chain in all_argument_variations:
 		duplication_combos.append([head_of_chain])
 
 		for tail in all_argument_variations:
 			if head_of_chain.split(" ")[0] == tail.split(" ")[0]: continue
-			for depth_level in range(1, depth):
+			for depth_level in range(1, repetition_depth):
 				chain = [tail] * depth_level + [head_of_chain]
 				duplication_combos.append(chain)
 
@@ -916,17 +872,22 @@ def get_ABC_cleanup_arguments(mutate: int) -> list[str]:
 		arguments.extend(get_ABC_argument_variations(argument, ABC_CLEANUP_ARGUMENTS[argument], mutate))
 	return arguments
 
-def get_all_ABC_cleanup_arguments(mutate: int) -> list[str]:
+def get_all_ABC_cleanup_arguments(test_size) -> list[str]:
 	""" Returns list of all individual ABC cleanup commands and their variations. """
+	mutate_level = test_size.value
+
+	target_arguments = list(ABC_CLEANUP_ARGUMENTS.keys())
+	if test_size == TestSize.Small: target_arguments = ["trim", "cleanup"]
+
 	arguments: list[str] = []
-	for argument in ABC_CLEANUP_ARGUMENTS:
-		arguments.extend(get_ABC_argument_variations(argument, ABC_CLEANUP_ARGUMENTS[argument], mutate))
+	for argument in target_arguments:
+		arguments.extend(get_ABC_argument_variations(argument, ABC_CLEANUP_ARGUMENTS[argument], mutate_level))
 	return arguments
 
-def get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(mutate: int) -> list[list[str]]:
+def get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(test_size: TestSize) -> list[list[str]]:
 	""" Returns a list of all optimization duo argument combos with a cleanup argument in between. """
-	duos = get_all_ABC_optimization_duos(3)
-	cleanup_arguments = get_all_ABC_cleanup_arguments(mutate)
+	duos = get_all_ABC_optimization_duos(test_size)
+	cleanup_arguments = get_all_ABC_cleanup_arguments(test_size)
 
 	sandwiched_triples: list[list[str]] = []
 	for cleanup_argument in cleanup_arguments:
@@ -971,69 +932,14 @@ def get_ABC_premade_optimization_strategies() -> list[list[str]]:
 	]
 	return strategies
 
-# ======================== Solver initiators ================ #
-
-def get_problem_files(profiler: ProfilerData, regex: str | None = None) -> list[dict]:
+def get_problem_files(profiler: ProfilerData, test_size: TestSize) -> list[dict]:
 	""" Returns a list of problem files whose name match the given regex, or all files if regex is None."""
 	all_problem_files = profiler.data["problem_files"]
 
-	if not regex: return all_problem_files
-
-	matching_problem_files = []
-	for problem_file in all_problem_files:
-		problem_file_name = Path(problem_file["source"]).name
-
-		if re.match(regex, problem_file_name):
-			matching_problem_files.append(problem_file)
-
-	return matching_problem_files
-
-# TODO: Implement this into get problem files
-# def get_small_problem_files(profiler: ProfilerData) -> list[dict]:
-# 	small = [
-# 		"ActionConverter",	# AIG size: 8
-# 		"amba_decomposed_arbiter_2",	# AIG size: 70
-# 		"amba_decomposed_arbiter_3",	# AIG size: 300
-# 		"amba_decomposed_decode",	# AIG size: 6
-# 		"arbiter_with_buffer",	# AIG size: 1
-# 		"Automata",	# AIG size: 70
-# 		"Automata32S",	# AIG size: 110
-# 		"Cockpitboard",	# AIG size: 15
-# 		"detector",	# AIG size: 50
-# 		"EnemeyModule",	# AIG size: 7
-# 		"EscalatorBidirectional",	# AIG size: 140
-# 		"EscalatorBidirectionalInit",	# AIG size: 150
-# 		"full_arbiter",	# AIG size: 150
-# 		"full_arbiter_2",	# AIG size: 50
-# 		"full_arbiter_3",	# AIG size: 300
-# 		"Gamelogic",	# AIG size: 80
-# 		"GamemodeChooser",	# AIG size: 100
-# 		"lilydemo10",	# AIG size: 7
-# 		"lilydemo17",	# AIG size: 100
-# 		"loadcomp3",	# AIG size: 200
-# 		"loadfull2",	# AIG size: 50
-# 		"ltl2dba_alpha",	# AIG size: 10
-# 		"ltl2dba_beta",	# AIG size: 140
-# 		"ltl2dba01",	# AIG size: 10
-# 		"MusicAppFeedback",	# AIG size: 30
-# 		"OneCounter",	# AIG size: 500
-# 		"prioritized_arbiter",	# AIG size: 30
-# 		"Scoreboard",	# AIG size: 10
-# 		"Sensor",	# AIG size: 300
-# 		"simple_arbiter",	# AIG size: 30
-# 		"Zoo0",	# AIG size: 20
-# 	]
-# 	targets = []
-# 	for wanted in small:
-# 		for problem_file in profiler.data["problem_files"]:
-# 			source = Path(problem_file["source"])
-# 			current = source.name.removesuffix("".join(source.suffixes))
-# 			if current == wanted:
-# 				targets.append(problem_file)
-# 				break
-
-# 	LOG("Selected: {} out of {} wanted problem files".format(len(targets), len(small)), VerbosityLevel.INFO)
-# 	return targets
+	if test_size == TestSize.Everything: return all_problem_files # All files
+	if test_size == TestSize.Big: return all_problem_files[::2] # Every other file
+	if test_size == TestSize.Medium: return all_problem_files[::5] # Every fifth file
+	if test_size == TestSize.Small: return all_problem_files[::20] # Every 20th file
 
 # ================================= Profiler Checkers ==================================== #
 
@@ -1149,7 +1055,7 @@ def check_profiler_structure():
 	check_problem_file_structure_correctness(profiler.data["problem_files"])
 
 def fix_missing_attributes(profiler: ProfilerData):
-	problem_files = get_problem_files(profiler)
+	problem_files = get_problem_files(profiler, TestSize.Everything)
 	for problem_file in tqdm(problem_files, desc="problem files", position=0):
 		if problem_file["known_unrealizable"]: continue
 
@@ -1188,7 +1094,7 @@ def fix_missing_attributes(profiler: ProfilerData):
 
 # =================== TESTS ======================= #
 
-def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float):
+def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float, test_size: TestSize):
 	# 1. Initialize profiler
 	profiler = ProfilerData(PROFILER_SOURCE)
 	initialize_problem_files(profiler)
@@ -1198,21 +1104,21 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 2. Solve all problem files
-	solve_all_problem_files(profiler, solve_timeout_s)
+	solve_all_problem_files(profiler, test_size, solve_timeout_s)
 	profiler.save()
 	LOG("Solved all problem files!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 3. Perform test 1
-	test_1(profiler, thread_count, optimize_timeout_s)
+	test_1(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 1: all optimizations once!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 4. Perform test 2
-	test_2(profiler, thread_count, optimize_timeout_s)
+	test_2(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 2: all duos!", VerbosityLevel.INFO)
 
@@ -1221,83 +1127,83 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	# 5 is procrastinated downwards!
 
 	# 6. Perform test 4
-	test_4(profiler, thread_count, optimize_timeout_s)
+	test_4(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 4: cleanups on solutions!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 7. Perform test 5
-	test_5(profiler, thread_count, optimize_timeout_s)
+	test_5(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 5: sandwiched cleanups!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 8. Perform test 6
-	test_6(profiler, thread_count, optimize_timeout_s)
+	test_6(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 6: premade strategies!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 5. Perform test 3
-	test_3(profiler, thread_count, optimize_timeout_s)
+	test_3(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 3: duplications!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 
-def solve_all_problem_files(profiler: ProfilerData, solve_timeout_s: float):
+def solve_all_problem_files(profiler: ProfilerData, test_size: TestSize, solve_timeout_s: float):
 	""" Will create a solution for every possible example problem file. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	solve_problem_files(problem_files, knor_flag_combos, solve_timeout_seconds=solve_timeout_s)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	solve_problem_files(target_problem_files, target_knor_arg_combos, solve_timeout_seconds=solve_timeout_s)
 
-def test_1(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
+def test_1(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Do all ABC optimizations once on each solution. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	optimizations = get_all_ABC_optimization_arguments(3)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	optimizations = get_all_ABC_optimization_arguments(test_size)
 	optimization_combos = list(map(lambda x: [x], optimizations))
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def test_2(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
+def test_2(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Do all ABC optimization duos on each solution. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	optimization_duos = get_all_ABC_optimization_duos(3)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	optimization_duos = get_all_ABC_optimization_duos(test_size)
+	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, optimization_duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def test_3(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
+def test_3(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Do the duplication test: See if repeating same argument is effective. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	optimization_combos = get_ABC_optimization_duplication_combos(2, 4)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	optimization_combos = get_ABC_optimization_duplication_combos(test_size)
+	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def test_4(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
+def test_4(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Performs cleanup optimization commands on unoptimized solutions. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	cleanup_arguments = get_ABC_cleanup_arguments(3)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def test_5(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
+def test_5(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Sandwich cleanup arguments between optimization duos to see if it has actual effect. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	sandwiched_cleanups = get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(3)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, sandwiched_cleanups, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	sandwiched_cleanups = get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(test_size)
+	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, sandwiched_cleanups, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def test_6(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
+def test_6(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Perform all premade optimization strategies. """
-	problem_files = get_problem_files(profiler)
-	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	strategy_combos = get_ABC_premade_optimization_strategies()
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, strategy_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, strategy_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
 """
@@ -1535,3 +1441,57 @@ def test_6(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float)
 # 	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
 # 	plt.xticks(rotation=45)
 # 	plt.show()
+
+# ================================================================
+
+# def calculate_optimization_gain(previous_AND_gate_count: int, new_AND_gate_count: int) -> float:
+# 	""" Calculates percentage of decrease in size, a.k.a. our view of what "gain" is """
+# 	difference = previous_AND_gate_count - new_AND_gate_count
+# 	gain = difference / previous_AND_gate_count
+# 	return gain
+
+# # Returns dictionary collecting exploded results from repetition optimizations
+# def collect_duplication_data(problem_files: list[dict]) -> dict:
+# 	duplication_data = {"head": [], "tail": [], "repetition": [], "gain": []}
+# 	for arg_head in ABC_OPTIMIZATION_ARGUMENTS:
+# 		for arg_tail in ABC_OPTIMIZATION_ARGUMENTS:
+# 			if arg_head == arg_tail: continue
+
+# 			for problem_file in problem_files:
+# 				if problem_file["known_unrealizable"] == True: continue
+
+# 				for solve_attempt in problem_file["solve_attempts"]:
+# 					if solve_attempt["timed_out"] or solve_attempt["crashed"]: continue
+
+# 					AND_count_history = [solve_attempt["data"]["and_gates"]]
+
+# 					for repetition in range(REPETITION_TEST_MAX_REPETITION):
+# 						test = [arg_head] * repetition + [arg_tail]
+# 						optimization = get_optimization_with_args(solve_attempt["optimizations"], test)
+						
+# 						if not optimization: continue
+						
+# 						if optimization["timed_out"]:
+# 							raise Exception("Data not available due to previous timed-out calculation")
+
+# 						previous = AND_count_history[-1]
+# 						current = optimization["data"]["and_gates"]
+# 						AND_count_history.append(current)
+
+# 						gain = 100 * calculate_optimization_gain(previous, current)
+
+# 						duplication_data["head"].append(arg_head)
+# 						duplication_data["tail"].append(arg_tail)
+# 						duplication_data["repetition"].append(repetition)
+# 						duplication_data["gain"].append(gain)
+
+# 	return duplication_data
+
+# # Plots the repetition minimization results into a separate window
+# def plot_repetition_minimization_results():
+# 	profiler = ProfilerData(PROFILER_SOURCE)
+# 	sns.set_theme()
+# 	data = collect_duplication_data(profiler.data["problem_files"])
+# 	figure = sns.catplot(data=data, col="head", x="repetition", y="gain", hue="tail", kind="boxen")
+# 	plt.show()
+
