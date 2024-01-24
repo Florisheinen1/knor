@@ -58,32 +58,53 @@ class VerbosityLevel(Enum):
 	ERROR = 2
 	WARNING = 3
 	INFO = 4
+	DETAIL = 5
+
+class SolveProblemFileWorth(Enum):
+	YES = "yes"
+	NO_UNREALIZABLE = "unrealizable"
+	NO_CRASHED = "crashed"
+	NO_TIMED_OUT = "timed-out"
+	NO_ALREADY_SOLVED = "already solved"
+
+LOG_VERBOSITY_LEVEL = VerbosityLevel.WARNING
+LOG_TO_TQDM = True
+
+def LOG(message: str, message_verbosity_level: VerbosityLevel):
+	global LOG_VERBOSITY_LEVEL, LOG_TO_TQDM
+
+	prefix = ""
+	if message_verbosity_level == VerbosityLevel.ERROR: prefix = "ERROR"
+	if message_verbosity_level == VerbosityLevel.WARNING: prefix = "WARNING"
+	if message_verbosity_level == VerbosityLevel.INFO: prefix = "INFO"
+	if message_verbosity_level == VerbosityLevel.DETAIL: prefix = "DETAIL"
+
+	if message_verbosity_level.value <= LOG_VERBOSITY_LEVEL.value:
+		# Then we print it!
+		log_text = "[{}]: {}".format(prefix, message)
+		if LOG_TO_TQDM: tqdm.write(log_text)
+		else: print(log_text)
 
 class ProfilerData:
 	def __init__(self, source: Path):
 		self.source: Path = source
 		if source.is_file():
 			with open(source, "r") as file:
-				tqdm.write("Loading profiler data from '{}'... ".format(source), end="")
-				print(flush=True, end="")
+				LOG("Loading profiler data from '{}'... ".format(source), VerbosityLevel.INFO)
 
 				self.data = json.load(file)
-				tqdm.write("Done!")
+				LOG("Successfully loaded profiler.", VerbosityLevel.INFO)
 		else:
 			self.data = { "problem_files": [] }
-			tqdm.write("Created new profiler data")
+			LOG("Created new profiler data", VerbosityLevel.INFO)
 			self.save()
 
 	# Saves current data to source file
-	def save(self, verbosity_level=VerbosityLevel.WARNING):
-		if verbosity_level.value >= VerbosityLevel.WARNING.value:
-			tqdm.write("WARNING: Saving profiler data. Do not quit... ", end="")
-			print(flush=True, end="")
+	def save(self):
+		LOG("WARNING: Saving profiler data. Do not quit... ", VerbosityLevel.INFO)
 		with open(self.source, 'w') as file:
 			json.dump(self.data, file, indent=3)
-		
-		if verbosity_level.value >= VerbosityLevel.WARNING.value:
-			tqdm.write("Saved results in '{}'".format(self.source))
+		LOG("Saved results in '{}'".format(self.source), VerbosityLevel.INFO)
 
 def get_problem_file_paths() -> list[Path]:
 	""" Gets list of all problem file paths.
@@ -185,15 +206,14 @@ def get_solve_attempt_with_args(solve_attempts: list[dict], args: list[str]) -> 
 			return attempt
 	return None
 
-# Checks if performing the given solve attempt will gain us new information
-def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str], solve_timeout_seconds: int) -> bool:
+def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str], solve_timeout_seconds: float) -> SolveProblemFileWorth:
 	""" Tells if attempting to solve the given problem with given arguments will give new data.\n
 		Returns True unless:
 		- The problem is unrealizable
 		- Previous solve attempt crashed
 		- Previous solve attempt timed out, and this time no more time is allowed
 		- Successfully solved it already"""
-	if problem_file["known_unrealizable"]: return False
+	if problem_file["known_unrealizable"]: return SolveProblemFileWorth.NO_UNREALIZABLE
 
 	previous_solve_attempt: dict | None = None
 	for solve_attempt in problem_file["solve_attempts"]:
@@ -203,17 +223,17 @@ def is_solve_attempt_worth_it(problem_file: dict, knor_argument_combo: list[str]
 	
 	# If we have not tried this yet, we will gain new information by trying
 	if not previous_solve_attempt:
-		return True
+		return SolveProblemFileWorth.YES
 	else:
 		# If we have tried before:
 		# Do not retry if previous time crashed
-		if previous_solve_attempt["crashed"]: return False
+		if previous_solve_attempt["crashed"]: return SolveProblemFileWorth.NO_CRASHED
 		
 		# If previous try timed out, only retry if we have bigger timeout this time
-		if previous_solve_attempt["timed_out"] and solve_timeout_seconds > previous_solve_attempt["solve_time"]: return True
+		if previous_solve_attempt["timed_out"] and solve_timeout_seconds > previous_solve_attempt["solve_time"]: return SolveProblemFileWorth.YES
 
 		# Otherwise, we should not try again
-		return False
+		return SolveProblemFileWorth.NO_TIMED_OUT
 
 def run_shell_command(cmd: str, timeout_seconds: float | None, allow_keyboard_interrupts: bool) -> tuple[ShellCommandResult, subprocess.Popen[bytes] | None]:
 	""" Runs linux shell command with given timeout in seconds.\n
@@ -250,7 +270,7 @@ def run_shell_command(cmd: str, timeout_seconds: float | None, allow_keyboard_in
 		time.sleep(0.01)
 
 
-def parse_aig_read_stats_output(cmd_output: str, verbosity_level: VerbosityLevel=VerbosityLevel.ERROR) -> dict | None:
+def parse_aig_read_stats_output(cmd_output: str) -> dict | None:
 	""" Parses AIG stats from given output of a shell command.\n
 	 	Looks for the first ABC 'print_stats' output and returns tuple of:
 		- Number of AND gates,
@@ -273,9 +293,7 @@ def parse_aig_read_stats_output(cmd_output: str, verbosity_level: VerbosityLevel
 			"outputs": outputs
 		}
 	except (IndexError, ValueError):
-		if verbosity_level.value >= VerbosityLevel.ERROR.value:
-			tqdm.write("Failed to parse AIG output:")
-			tqdm.write(cmd_output)
+		LOG("Failed to parse AIG stats: {}".format(cmd_output), VerbosityLevel.DETAIL)
 		return None
 
 def get_aig_stats_from_file(file: Path) -> dict | None:
@@ -286,11 +304,11 @@ def get_aig_stats_from_file(file: Path) -> dict | None:
 	_, result = run_shell_command(abc_read_cmd, AIG_PARSE_TIMEOUT_SECONDS, allow_keyboard_interrupts=False)
 	
 	if result is None:
-		tqdm.write("ERROR: Reading AIG timed out. Please increase AIG_PARSE_TIMEOUT_SECONDS.")
+		LOG("Reading AIG timed out. Please increase AIG_PARSE_TIMEOUT_SECONDS.", VerbosityLevel.ERROR)
 		return None
 	
 	if not result.stdout:
-		tqdm.write("ERROR: Failed to get STDOUT of AIG parse command.")
+		LOG("Failed to get STDOUT of AIG parse command.", VerbosityLevel.ERROR)
 		return None
 
 	shell_output = result.stdout.read().decode()
@@ -299,8 +317,7 @@ def get_aig_stats_from_file(file: Path) -> dict | None:
 def solve_problem_files(
 		problem_files: list[dict],
 		knor_argument_combos: list[list[str]],
-		verbosity_level=VerbosityLevel.ERROR,
-		solve_timeout=MAX_TIME_SECONDS_FOR_KNOR_COMMAND):
+		solve_timeout_seconds: float):
 	""" Solves each gven problem file with all given Knor argument combinations.
 		Given timeout applies to the timeout of each solve attempt."""
 	
@@ -311,14 +328,12 @@ def solve_problem_files(
 	for problem_file in tqdm(problem_files, desc="problem_file", position=0, leave=False):
 		problem_file_source = Path(problem_file["source"])
 		if not problem_file_source.is_file():
-			if verbosity_level.value >= VerbosityLevel.ERROR.value:
-				tqdm.write("Error: problem file '{}' not available".format(problem_file_source))
+			LOG("Failed to open problem file '{}'.".format(problem_file_source), VerbosityLevel.ERROR)
 			continue
 
 		# Skip this problem file if we already know it is unrealizable
 		if problem_file["known_unrealizable"]:
-			if verbosity_level.value >= VerbosityLevel.INFO.value:
-				tqdm.write("INFO: Skipping '{}' because its unrealizable".format(problem_file_source))
+			LOG("Skipping problem file '{}' because it's unrealizable.".format(problem_file_source), VerbosityLevel.DETAIL)
 			continue
 		
 		# Prepare the specific output folder for this problem file
@@ -326,9 +341,9 @@ def solve_problem_files(
 		if not solution_output_folder.is_dir(): solution_output_folder.mkdir()
 
 		for knor_argument_combo in tqdm(knor_argument_combos, desc="arg_combination", position=1, leave=False):
-			if not is_solve_attempt_worth_it(problem_file, knor_argument_combo, solve_timeout):
-				tqdm.write("Skipping solving '{}' with args {} because not worth it".format(problem_file_source, knor_argument_combo))
-				# TODO: Better feedback message
+			attempt_worth_it = is_solve_attempt_worth_it(problem_file, knor_argument_combo, solve_timeout_seconds)
+			if not attempt_worth_it == SolveProblemFileWorth.YES:
+				LOG("Skipping solving '{}' with args {} because: {}.".format(problem_file_source, knor_argument_combo, attempt_worth_it.value), VerbosityLevel.DETAIL)
 				continue
 			
 			output_file_name = problem_file_source.with_stem(problem_file_source.stem + "_args" + "".join(knor_argument_combo)).with_suffix(".aag" if "-a" in knor_argument_combo else ".aig").name
@@ -337,39 +352,36 @@ def solve_problem_files(
 			solve_command = "./{} {} {} > {}".format(KNOR_BINARY, problem_file_source, " ".join(knor_argument_combo), output_file)
 
 			command_start = time.time()
-			command_status, command_result = run_shell_command(solve_command, solve_timeout, True)
+			command_status, command_result = run_shell_command(solve_command, solve_timeout_seconds, True)
 			command_time = time.time() - command_start
 
 			solution_data: dict | None = None
 			solve_result = SolveResult.SOLVED
 
 			if command_status == ShellCommandResult.INTERRUPTED:
-				tqdm.write("Aborted solving '{}' with {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, time.time() - command_start))
+				LOG("Aborted solving '{}' with {} after: {:.2f}s.".format(problem_file_source, knor_argument_combo, time.time() - command_start), VerbosityLevel.OFF)
 				return
 
 			elif command_status == ShellCommandResult.TIMEOUT:
-				tqdm.write("Timeout for solving '{}' with args{} in: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
+				LOG("Timeout for solving '{}' with args {} in: {:.2f}s.".format(problem_file_source, knor_argument_combo, command_time), VerbosityLevel.INFO)
 				solve_result = SolveResult.TIMED_OUT
 
 			elif command_result is None:
-				tqdm.write("Error: Should have gotten command result, but received None")
+				LOG("Should have gotten command result, but received None.", VerbosityLevel.ERROR)
 				return
 
 			elif command_result.returncode == 10:
 				# Successfully solved problem, so read solution AIG data
-				if verbosity_level.value >= VerbosityLevel.INFO.value:
-					tqdm.write("Solved '{}' with args {} in {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
+				LOG("Solved '{}' with args {} in {:.2f}s".format(problem_file_source, knor_argument_combo, command_time), VerbosityLevel.DETAIL)
 				solution_data = get_aig_stats_from_file(output_file)
-				if not solution_data and verbosity_level.value >= VerbosityLevel.ERROR.value:
-					tqdm.write("Error: Successfully solved '{}' with args {} into '{}' but failed to parse AIG data".format(problem_file_source, knor_argument_combo, output_file))
+				if not solution_data:
+					LOG("Successfully solved '{}' with args {} into '{}' but failed to parse AIG data.".format(problem_file_source, knor_argument_combo, output_file), VerbosityLevel.ERROR)
 				
 			elif command_result.returncode == 20:
-				if verbosity_level.value >= VerbosityLevel.INFO.value:
-					tqdm.write("Unrealizable to solve '{}'. Took: {:.2f}s".format(problem_file_source, command_time))
+				LOG("Unrealizable to solve '{}' after {:.2f}s.".format(problem_file_source, command_time), VerbosityLevel.INFO)
 				solve_result = SolveResult.UNREALIZABLE
 			else:
-				if verbosity_level.value >= VerbosityLevel.WARNING.value:
-					tqdm.write("Warning: Crashed from solving '{}' with args {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time))
+				LOG("Warning: Crashed from solving '{}' with args {} after: {:.2f}s".format(problem_file_source, knor_argument_combo, command_time), VerbosityLevel.WARNING)
 				solve_result = SolveResult.CRASHED
 
 			# === Store the new result
@@ -398,9 +410,9 @@ def solve_problem_files(
 					"data": solution_data,
 					"optimizations": []
 				})
+				LOG("Added new solve attempt of '{}' with args {} to profiler.".format(problem_file_source, knor_argument_combo), VerbosityLevel.DETAIL)
 			else:
-				if verbosity_level.value >= VerbosityLevel.INFO.value:
-					tqdm.write("Updated previous solve attempt of: '{}' with args: {}".format(problem_file_source, knor_argument_combo))
+				LOG("Updated previous solve attempt of: '{}' with args: {}".format(problem_file_source, knor_argument_combo), VerbosityLevel.INFO)
 				# Retry attempt, so update previous attempt
 				previous_solve_attempt["data"] = solution_data
 
@@ -498,8 +510,7 @@ def execute_optimization_on_solution(
 		solution: dict,
 		arguments: list[str],
 		output_folder: Path,
-		optimize_timeout: float=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND,
-		verbosity_level: VerbosityLevel = VerbosityLevel.WARNING):
+		optimize_timeout_seconds: float):
 	""" Executes the optimizations of given arguments if they have not been done before on the given solution.
 		Ensures intermediate optimization results are stored as well for reuse later.
 		Stores results in given output folder."""
@@ -524,9 +535,8 @@ def execute_optimization_on_solution(
 			if not previous_optimize_attempt["timed_out"]: continue
 
 			# If previous attempt timed out and we do not have more time than then, this optimization cannot be done
-			if optimize_timeout <= previous_optimize_attempt["optimize_time_python"]:
-				if verbosity_level.value >= VerbosityLevel.INFO.value:
-					tqdm.write("Cannot improve timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]))
+			if optimize_timeout_seconds <= previous_optimize_attempt["optimize_time_python"]:
+				LOG("Cannot improve timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]), VerbosityLevel.INFO)
 				return
 
 		# The file that needs to be optimized
@@ -543,43 +553,39 @@ def execute_optimization_on_solution(
 
 			# If we failed to find the origin optimization, return
 			if not origin_optimization:
-				if verbosity_level.value >= VerbosityLevel.ERROR.value:
-					tqdm.write("Error: Failed to find optimization base for {} ({}) on solution {}".format(arguments_build_up, origin_arguments, solution["args_used"]))
+				LOG("Failed to find optimization base for {} ({}) on solution {}".format(arguments_build_up, origin_arguments, solution["args_used"]), VerbosityLevel.ERROR)
 				return
 			
 			source_file = Path(origin_optimization["output_file"])
 
 		# Check if source file actually still exists
 		if not source_file.exists():
-			if verbosity_level.value >= VerbosityLevel.ERROR.value:
-				tqdm.write("Error: Source file missing: '{}'".format(source_file))
+			LOG("Source file missing: '{}'".format(source_file), VerbosityLevel.ERROR)
 			return
 
 		output_file = output_folder / "m{}.aig".format(new_optimization_id)
 		command = create_abc_optimization_command(source_file, [argument], output_file)
 
 		optimize_start = time.time()
-		result_type, result = run_shell_command(command, MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND, False)
+		result_type, result = run_shell_command(command, optimize_timeout_seconds, False)
 		optimize_time = time.time() - optimize_start
 
 		if result_type == ShellCommandResult.TIMEOUT:
 			# We can no longer continue this optimization path, so return
-			if verbosity_level.value >= VerbosityLevel.WARNING.value:
-				tqdm.write("Warning: Timed out optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
+			LOG("Timed out optimizing with {} on solution {} after {:.2f}s.".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.WARNING)
 			return
 		
 		stats: dict | None = None
 		if result and result.stdout:
 			output = result.stdout.read().decode()
-			stats = parse_aig_read_stats_output(output, verbosity_level=VerbosityLevel.ERROR)
-			if not stats and verbosity_level.value >= VerbosityLevel.ERROR.value:
+			stats = parse_aig_read_stats_output(output)
+			if not stats:
 				# That means we did not time out, but ABC gave an error
-				tqdm.write("ABC command crashed on: \n{}".format(command))
+				LOG("ABC command crashed on: \n{}".format(command), VerbosityLevel.ERROR)
 		
 		if not result:
-			if verbosity_level.value >= VerbosityLevel.ERROR.value:
-				tqdm.write("Error: Did not get result from optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time))
-				return
+			LOG("Did not get result from optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.ERROR)
+			return
 		
 		# If we retry optimization, update previous one. Otherwise, append it
 		if previous_optimize_attempt:
@@ -591,7 +597,7 @@ def execute_optimization_on_solution(
 			previous_optimize_attempt["timed_out"] = result == None
 			previous_optimize_attempt["data"] = stats
 			previous_optimize_attempt["id"] = new_optimization_id
-			tqdm.write("Retried optimization {} of {}".format(arguments_build_up, solution["args_used"]))
+			LOG("Retried optimization {} of {}".format(arguments_build_up, solution["args_used"]), VerbosityLevel.INFO)
 		else:
 			optimization = {
 				"command_used": command,
@@ -604,7 +610,6 @@ def execute_optimization_on_solution(
 				"id": new_optimization_id
 			}
 			solution["optimizations"].append(optimization)
-			# tqdm.write("Did optimization {} of {}".format(arguments_build_up, solution["args_used"]))
 
 		write_comment_to_aig_file(output_file, "Optimized with ABC arguments:\n{}".format(arguments))
 
@@ -614,8 +619,7 @@ def execute_optimizations_on_solutions(
 		problem_files: list[dict],
 		solve_argument_combos: list[list[str]] | None,
 		optimization_argument_combos: list[list[str]],
-		verbose=False,
-		timeout=MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND,
+		timeout_seconds: float,
 		n_threads: int = 1):
 	""" Optimizes the given solutions (or all if "None") of the given problem files with the given optimization arguments.\n
 		Performs optimizations on different threads on solution-level. """
@@ -628,7 +632,7 @@ def execute_optimizations_on_solutions(
 	
 	for problem_file in tqdm(problem_files, desc="problem files", position=0):
 		if problem_file["known_unrealizable"]:
-			tqdm.write("Unrealizable problem file cannot be optimized: '{}'".format(problem_file["source"]))
+			LOG("Skipping unrealizable problem file: '{}', as it cannot be optimized".format(problem_file["source"]), VerbosityLevel.INFO)
 			continue # We cannot optimize unrealizable solutions
 
 		# Ensure problem file specific output folder
@@ -646,17 +650,17 @@ def execute_optimizations_on_solutions(
 			for solve_argument_combo in solve_argument_combos:
 				matching = get_solve_attempt_with_args(problem_file["solve_attempts"], solve_argument_combo)
 				if matching: matching_solve_attempts.append(matching)
-				else: tqdm.write("Warning: Missing solve attempt {} for '{}'".format(solve_argument_combo, problem_file_source))
+				else: LOG("Missing solve attempt {} for '{}'".format(solve_argument_combo, problem_file_source), VerbosityLevel.WARNING)
 
 		# Filter out invalid solutions
 		target_solutions = []
 		for matching_solve_attempt in matching_solve_attempts:
 			if matching_solve_attempt["crashed"] or matching_solve_attempt["timed_out"]:
 				# We cannot optimize this solution, so skip it
-				tqdm.write("Cannot optimize solution of '{}' with {} because the solve attempt {}".format(
+				LOG("Cannot optimize solution of '{}' with {} because the solve attempt {}".format(
 					problem_file_source,
 					matching_solve_attempt["args_used"],
-					"crashed" if matching_solve_attempt["crashed"] else "timed out"))
+					"crashed" if matching_solve_attempt["crashed"] else "timed out"), VerbosityLevel.INFO)
 			else:
 				target_solutions.append(matching_solve_attempt)
 
@@ -670,9 +674,9 @@ def execute_optimizations_on_solutions(
 
 				for optimization_argument_combo in tqdm(optimization_argument_combos, desc="optimization", position=2, leave=False):				
 					try:
-						execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder)
+						execute_optimization_on_solution(target_solution, optimization_argument_combo, solution_output_folder, timeout_seconds)
 					except KeyboardInterrupt:
-						tqdm.write("Aborted optimizing '{}' with optimizations {}.".format(target_solution["output_file"], optimization_argument_combo))
+						LOG("User aborted optimizing '{}' with optimizations {}.".format(target_solution["output_file"], optimization_argument_combo), VerbosityLevel.OFF)
 						return
 		else:
 			# Spawn n_threads amount of thread workers that will perform the optimizations
@@ -702,6 +706,7 @@ def execute_optimizations_on_solutions(
 					finished_list_mutex,
 					optimization_argument_combos,
 					problem_folder,
+					timeout_seconds,
 					"worker_{}".format(i),
 					2 + i
 					))
@@ -715,7 +720,7 @@ def execute_optimizations_on_solutions(
 
 			# If the threads stopped becasuse of the KeyboardInterrupt signal, return
 			if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set():
-				tqdm.write("Abborted by user.")
+				LOG("User aborted optimizing at problem file: '{}'".format(problem_file_source), VerbosityLevel.OFF)
 				return
 
 def status_worker_function(
@@ -744,6 +749,7 @@ def optimize_worker_function(
 		finished_list_mutex: threading.Lock,
 		optimization_argument_combos: list[list[str]],
 		problem_folder: Path,
+		optimize_timeout_seconds: float,
 		tqdm_bar_title: str,
 		tqdm_bar_position: int
 		):
@@ -770,12 +776,11 @@ def optimize_worker_function(
 			if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): break
 
 			# This argument combo needs to be applied on the picked solution
-			execute_optimization_on_solution(target_solution, argument_combo, solution_output_folder)
+			execute_optimization_on_solution(target_solution, argument_combo, solution_output_folder, optimize_timeout_seconds)
 
 		# Now add the solution we were optimizing to the finished pile
 		with finished_list_mutex:
 			finished_solutions.append(target_solution)
-
 
 # ======================== Argument Creators ===================== #
 def get_knor_flag_combinations(knor_synthesize_flags: list[str], knor_solve_flags: list[str], binary_out: bool = True) -> list[list[str]]:
@@ -1022,7 +1027,7 @@ def solve_cleanup_optimization_tests():
 	target_problem_files = get_problem_files(profiler, None)
 	target_solutions = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimization_args = get_cleanup_optimizations_test_arguments()
-	execute_optimizations_on_solutions(target_problem_files, target_solutions, optimization_args, timeout=50)
+	execute_optimizations_on_solutions(target_problem_files, target_solutions, optimization_args, timeout_seconds=50)
 	profiler.save()
 
 # p = ProfilerData(PROFILER_SOURCE)
@@ -1091,7 +1096,7 @@ def get_small_problem_files(profiler: ProfilerData) -> list[dict]:
 				targets.append(problem_file)
 				break
 
-	print("Selected: {} out of {} wanted problem files".format(len(targets), len(small)))
+	LOG("Selected: {} out of {} wanted problem files".format(len(targets), len(small)), VerbosityLevel.INFO)
 	return targets
 
 # def solve_for_test_0():
@@ -1536,7 +1541,7 @@ def check_problem_file_structure_correctness(problem_files: list[dict]):
 			for solve_attempt in problem_file["solve_attempts"]:
 				check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
 
-	tqdm.write("Done")
+	LOG("Finished checking profiler structure correctness", VerbosityLevel.INFO)
 
 def check_profiler_structure():
 	profiler = ProfilerData(PROFILER_SOURCE)
@@ -1551,7 +1556,7 @@ def fix_missing_attributes(profiler: ProfilerData):
 		for solve_attempt in tqdm(problem_file["solve_attempts"], desc="solve_attempt", position=1):
 			if not "data" in solve_attempt:
 				solve_attempt["data"] = None
-				tqdm.write("Added 'data' attribute to: {} of {}".format(solve_attempt["args_used"], source))
+				LOG("Added 'data' attribute to: {} of {}".format(solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
 			if solve_attempt["crashed"] or solve_attempt["timed_out"]: continue
 
@@ -1560,11 +1565,11 @@ def fix_missing_attributes(profiler: ProfilerData):
 				stats = get_aig_stats_from_file(solve_attempt["output_file"])
 				if not stats: raise Exception("Should have data, but failed to get stats in solve attempt: {} of problem '{}'".format(solve_attempt["args_used"], source))
 				solve_attempt["data"] = stats
-				tqdm.write("Read and set AIG stats of solve attempt {} of problem '{}'".format(solve_attempt["args_used"], source))
+				LOG("Read and set AIG stats of solve attempt {} of problem '{}'".format(solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
 			if not "optimizations" in solve_attempt:
 				solve_attempt["optimizations"] = []
-				tqdm.write("Added empty optimizations list to solve attempt {} of problem {}".format(solve_attempt["args_used"], source))
+				LOG("Added empty optimizations list to solve attempt {} of problem {}".format(solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
 			for optimization in solve_attempt["optimizations"]:
 				if optimization["timed_out"]: continue
@@ -1577,7 +1582,7 @@ def fix_missing_attributes(profiler: ProfilerData):
 					stats = get_aig_stats_from_file(optimization["output_file"])
 					if not stats: print("Should have data, but failed to get stats in optimization: {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
 					optimization["data"] = stats
-					tqdm.write("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
+					LOG("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
 
 # =================== CLUSTER TESTS ======================= #
@@ -1587,56 +1592,56 @@ def do_cluster_stuff():
 	profiler = ProfilerData(PROFILER_SOURCE)
 	initialize_problem_files(profiler)
 	profiler.save()
-	tqdm.write("Initialized profiler!")
+	LOG("Initialized profiler!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 2. Solve all problem files
 	solve_all_problem_files(profiler)
 	profiler.save()
-	tqdm.write("Solved all problem files!")
+	LOG("Solved all problem files!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 3. Perform test 1
 	cluster_test_1(profiler)
 	profiler.save()
-	tqdm.write("Performed test 1: all optimizations once!")
+	LOG("Performed test 1: all optimizations once!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 4. Perform test 2
 	cluster_test_2(profiler)
 	profiler.save()
-	tqdm.write("Performed test 2: all duos!")
+	LOG("Performed test 2: all duos!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 5. Perform test 3
 	cluster_test_3(profiler)
 	profiler.save()
-	tqdm.write("Performed test 3: duplications!")
+	LOG("Performed test 3: duplications!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 	
 	# 6. Perform test 4
 	cluster_test_4(profiler)
 	profiler.save()
-	tqdm.write("Performed test 4: cleanups on solutions!")
+	LOG("Performed test 4: cleanups on solutions!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 7. Perform test 5
 	cluster_test_5(profiler)
 	profiler.save()
-	tqdm.write("Performed test 5: sandwiched cleanups!")
+	LOG("Performed test 5: sandwiched cleanups!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 8. Perform test 6
 	cluster_test_6(profiler)
 	profiler.save()
-	tqdm.write("Performed test 6: premade strategies!")
+	LOG("Performed test 6: premade strategies!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
@@ -1645,7 +1650,7 @@ def solve_all_problem_files(profiler: ProfilerData):
 	""" Will create a solution for every possible example problem file. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	solve_problem_files(problem_files, knor_flag_combos, solve_timeout=CLUSTER_SOLVE_TIMEOUT)
+	solve_problem_files(problem_files, knor_flag_combos, solve_timeout_seconds=CLUSTER_SOLVE_TIMEOUT)
 
 def cluster_test_1(profiler: ProfilerData):
 	""" Do all ABC optimizations once on each solution. """
@@ -1653,21 +1658,21 @@ def cluster_test_1(profiler: ProfilerData):
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimizations = get_all_ABC_optimization_arguments(3)
 	optimization_combos = list(map(lambda x: [x], optimizations))
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
 
 def cluster_test_2(profiler: ProfilerData):
 	""" Do all ABC optimization duos on each solution. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimization_duos = get_all_ABC_optimization_duos(3)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_duos, timeout=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_duos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
 
 def cluster_test_3(profiler: ProfilerData):
 	""" Do the duplication test: See if repeating same argument is effective. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimization_combos = get_ABC_optimization_duplication_combos(2, 4)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
 
 def cluster_test_4(profiler: ProfilerData):
 	""" Performs cleanup optimization commands on unoptimized solutions. """
@@ -1675,21 +1680,21 @@ def cluster_test_4(profiler: ProfilerData):
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	cleanup_arguments = get_ABC_cleanup_arguments(3)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, cleanup_combos, timeout=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, cleanup_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
 
 def cluster_test_5(profiler: ProfilerData):
 	""" Sandwich cleanup arguments between optimization duos to see if it has actual effect. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	sandwiched_cleanups = get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(3)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, sandwiched_cleanups, timeout=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, sandwiched_cleanups, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
 
 def cluster_test_6(profiler: ProfilerData):
 	""" Perform all premade optimization strategies. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	strategy_combos = get_ABC_premade_optimization_strategies()
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, strategy_combos, timeout=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, strategy_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
 
 
 """
