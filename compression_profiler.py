@@ -67,6 +67,13 @@ class SolveProblemFileWorth(Enum):
 	NO_TIMED_OUT = "timed-out"
 	NO_ALREADY_SOLVED = "already solved"
 
+# Indicates how extensive the tests need to be
+class TestSize(Enum):
+	Small = 0			# Few problem files,		1 mutation,  3 repetitions
+	Medium = 1			# Quarter of problem files,	2 mutations, 3 repetitions
+	Big = 2				# Half of problem files, 	3 mutations, 4 repetitions
+	Everything = 3		# All problem files, 		4 mutations, 5 repetitions
+
 LOG_VERBOSITY_LEVEL = VerbosityLevel.WARNING
 LOG_TO_TQDM = True
 
@@ -964,21 +971,6 @@ def get_ABC_premade_optimization_strategies() -> list[list[str]]:
 	]
 	return strategies
 
-
-# TODO: Implement this during one of the proper tests
-# def get_duplication_optimization_arguments(arguments: list[str], depth: int) -> list[list[str]]:
-# 	""" Returns a list of arguments used for checking if duplicate sequential
-# 		arguments have positive effect. """
-# 	arguments_list = []
-# 	for argument in arguments:
-# 		arguments_list.append([argument])
-
-# 		for heading_argument in arguments:
-# 			if heading_argument == argument: continue
-# 			for heading_length in range(1, depth):
-# 				arguments_list.append([heading_argument] * heading_length + [argument])
-# 	return arguments_list
-
 # ======================== Solver initiators ================ #
 
 def get_problem_files(profiler: ProfilerData, regex: str | None = None) -> list[dict]:
@@ -996,443 +988,52 @@ def get_problem_files(profiler: ProfilerData, regex: str | None = None) -> list[
 
 	return matching_problem_files
 
-# def solve_arbiter_problems():
-# 	""" Solves all problem files with 'arbiter' in their name. """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	initialize_problem_files(profiler)
-# 	target_knor_args = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-# 	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
-# 	solve_problem_files(target_problem_files, target_knor_args, solve_timeout=11)
-# 	profiler.save()
-
-# def test_duplication_optimizations_on_arbiter_solutions():
-# 	""" Optimizes all arbiter solutions to see if duplicate sequential optimizations make sense """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
-# 	target_solve_attempts = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-# 	target_optimization_arguments = get_duplication_optimization_arguments(list(ABC_OPTIMIZATION_ARGUMENTS.keys()), 4)
-# 	execute_optimizations_on_solutions(target_problem_files, target_solve_attempts, target_optimization_arguments, timeout=50)
-# 	profiler.save()
-
-def get_cleanup_optimizations_test_arguments():
-	arg_combos = []
-	for abc_arg in ABC_OPTIMIZATION_ARGUMENTS:
-		arg_combos.append([abc_arg])
-		arg_combos.append(["cleanup", abc_arg])
-		arg_combos.append([abc_arg, "cleanup"])
-	return arg_combos
-
-def solve_cleanup_optimization_tests():
-	profiler = ProfilerData(PROFILER_SOURCE)
-	target_problem_files = get_problem_files(profiler, None)
-	target_solutions = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	optimization_args = get_cleanup_optimizations_test_arguments()
-	execute_optimizations_on_solutions(target_problem_files, target_solutions, optimization_args, timeout_seconds=50)
-	profiler.save()
-
-# p = ProfilerData(PROFILER_SOURCE)
-
-# def optimize_for_test_1(profiler):
-# 	""" See if trim optimization has effect. """
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	trim_variants = get_abc_argument_flag_combinations("trim", CLEANUPS["trim"], 0)
-# 	abc_args = []
-# 	for trim_variant in trim_variants:
-# 		abc_args.append([trim_variant])
-# 		abc_args.append([trim_variant, "drw"])
-# 		abc_args.append(["drw", trim_variant])
-# 	execute_optimizations_on_solutions(a, b, abc_args, timeout=60)
-
-# def show_test_1(profiler):
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-
-# 	for problem_file in a:
-# 		for solve_attempt in problem_file["solve_attempts"]:
-# 			if not solve_attempt["args_used"] in b: continue
-# 			pass
-
-def get_small_problem_files(profiler: ProfilerData) -> list[dict]:
-	small = [
-		"ActionConverter",	# AIG size: 8
-		"amba_decomposed_arbiter_2",	# AIG size: 70
-		"amba_decomposed_arbiter_3",	# AIG size: 300
-		"amba_decomposed_decode",	# AIG size: 6
-		"arbiter_with_buffer",	# AIG size: 1
-		"Automata",	# AIG size: 70
-		"Automata32S",	# AIG size: 110
-		"Cockpitboard",	# AIG size: 15
-		"detector",	# AIG size: 50
-		"EnemeyModule",	# AIG size: 7
-		"EscalatorBidirectional",	# AIG size: 140
-		"EscalatorBidirectionalInit",	# AIG size: 150
-		"full_arbiter",	# AIG size: 150
-		"full_arbiter_2",	# AIG size: 50
-		"full_arbiter_3",	# AIG size: 300
-		"Gamelogic",	# AIG size: 80
-		"GamemodeChooser",	# AIG size: 100
-		"lilydemo10",	# AIG size: 7
-		"lilydemo17",	# AIG size: 100
-		"loadcomp3",	# AIG size: 200
-		"loadfull2",	# AIG size: 50
-		"ltl2dba_alpha",	# AIG size: 10
-		"ltl2dba_beta",	# AIG size: 140
-		"ltl2dba01",	# AIG size: 10
-		"MusicAppFeedback",	# AIG size: 30
-		"OneCounter",	# AIG size: 500
-		"prioritized_arbiter",	# AIG size: 30
-		"Scoreboard",	# AIG size: 10
-		"Sensor",	# AIG size: 300
-		"simple_arbiter",	# AIG size: 30
-		"Zoo0",	# AIG size: 20
-	]
-	targets = []
-	for wanted in small:
-		for problem_file in profiler.data["problem_files"]:
-			source = Path(problem_file["source"])
-			current = source.name.removesuffix("".join(source.suffixes))
-			if current == wanted:
-				targets.append(problem_file)
-				break
-
-	LOG("Selected: {} out of {} wanted problem files".format(len(targets), len(small)), VerbosityLevel.INFO)
-	return targets
-
-# def solve_for_test_0():
-# 	""" Solves each problem file with each Knor argument combination. """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_problem_files(profiler)
-# 	b = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-# 	solve_problem_files(a, b)
-# 	profiler.save()
-
-# def show_test_0():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	solve_attempt_arg_combos = get_small_problem_files(profiler)
-
-# 	raw_data = {
-# 		"problem_file_source": [],
-# 		"solve_args": [],
-# 		"synthesize_args": [],
-# 		"solve_time": [],
-# 		"and_gates": [],
-# 		"increase": [] 	# Increase in size compared to baseline (smallest AIG per problem file)
-# 	}
-
-# 	# Collect the minimums
-# 	minimum_and_gates = {}
-# 	for problem_file in profiler.data["problem_files"]:
-# 		if problem_file["known_unrealizable"]: continue
-# 		for solve_attempt in problem_file["solve_attempts"]:
-# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
-# 			if not solve_attempt["data"]: continue
-
-# 			source = problem_file["source"]
-# 			current_and_count = solve_attempt["data"]["and_gates"]
-# 			if source not in minimum_and_gates:
-# 				minimum_and_gates[source] = current_and_count
-# 			else:
-# 				minimum_and_gates[source] = min(minimum_and_gates[source], current_and_count) # At least 1 so we can compare
-	
-# 	# Compare each solution with the minimum (but not the 0 bests)
-# 	for problem_file in profiler.data["problem_files"]:
-# 		if problem_file["known_unrealizable"]: continue
-# 		for solve_attempt in problem_file["solve_attempts"]:
-# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
-# 			if not solve_attempt["data"]: continue
-
-# 			source = problem_file["source"]
-# 			args_used = solve_attempt["args_used"]
-# 			solve_args = args_used[-2]
-# 			synthesize_args = args_used[:-2]
-# 			and_count = solve_attempt["data"]["and_gates"]
-# 			solve_time = solve_attempt["solve_time"]
-
-# 			minimum_of_this_file = minimum_and_gates[source]
-# 			if minimum_of_this_file == 0: continue
-
-# 			increase = and_count / minimum_and_gates[source]
-
-# 			raw_data["problem_file_source"].append(source)
-# 			raw_data["solve_args"].append(solve_args)
-# 			raw_data["synthesize_args"].append(synthesize_args)
-# 			raw_data["solve_time"].append(solve_time)
-# 			raw_data["and_gates"].append(and_count)
-# 			raw_data["increase"].append(increase)
-
-# 	df = pd.DataFrame(raw_data)
-
-# 	df["synthesize_str"] = df["synthesize_args"].apply(lambda x: str(x))
-
-# 	sns.set_theme()
-# 	sns.catplot(data=df, kind="boxen", x="solve_args", y="increase", hue="synthesize_str")
-# 	plt.xticks(rotation=45)
-# 	plt.show()
-
-
-# 	return df
-
-
-# # Test 1: Compare rw and drw optimizations performance
-# def solve_for_test_1():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_small_problem_files(profiler)
-# 	b = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-# 	solve_problem_files(a, b, solve_timeout=60)
-# 	profiler.save()
-
-# def optimize_for_test_1():
-# 	""" See rewrite(rw) or dag-aware rewrite(drw) is better. """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
-# 	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
-# 	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
-# 	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
-# 	profiler.save()
-
-# def show_test_1(profiler: ProfilerData, n: int = 5):
-# 	""" Plots the top n best average arguments for rw and drw. """
-# 	problem_files = get_target_problem_files(profiler)
-# 	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
-# 	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
-# 	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
-# 	optimize_arg_combos = list(map(lambda x: [x], rw_variants + drw_variants))
-	
-# 	raw_data = {
-# 		"solve_args": [],
-# 		"opt_arg_bases": [],
-# 		"opt_arg_flags": [],
-# 		"gains": [],
-# 		"times": []
-# 	}
-
-# 	for problem_file in problem_files:
-# 		for solve_attempt in problem_file["solve_attempts"]:
-# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
-# 			if not solve_attempt["data"]: continue
-
-# 			solve_args_used = " ".join(solve_attempt["args_used"])
-
-# 			base_and_count = solve_attempt["data"]["and_gates"]
-
-# 			for optimization in solve_attempt["optimizations"]:
-# 				if not optimization["args_used"] in optimize_arg_combos: continue
-# 				if len(optimization["args_used"]) != 1: raise Exception("Expected only one argument")
-
-# 				argument = optimization["args_used"][0]
-# 				arg_base: str = argument.split(" ")[0]
-# 				flags: str = " ".join(argument.split(" ")[1:])
-
-# 				new_and_count = optimization["data"]["and_gates"]
-# 				gain = base_and_count / new_and_count
-
-# 				raw_data["solve_args"].append(solve_args_used)
-# 				raw_data["opt_arg_bases"].append(arg_base)
-# 				raw_data["opt_arg_flags"].append(flags)
-# 				raw_data["gains"].append(gain)
-# 				raw_data["times"].append(optimization["optimize_time_python"])
-
-# 	data = pd.DataFrame(raw_data)
-
-# 	# Get average of each argument over each solution
-# 	averaged_gain_over_files = data.groupby(["opt_arg_bases", "opt_arg_flags"]).agg({"gains": "mean"})
-# 	# Get the top 5 of each argument base with the highest gain
-# 	top_argument_df = averaged_gain_over_files.sort_values("gains", ascending=False).groupby(["opt_arg_bases"]).head(5).sort_values("opt_arg_bases").reset_index()
-
-# 	top_arguments_found = list(top_argument_df["opt_arg_bases"] + " " + top_argument_df["opt_arg_flags"])
-	
-# 	# Add complete optimization argument as column
-# 	data["argument"] = (data["opt_arg_bases"] + " " + data["opt_arg_flags"]).apply(lambda x: x.strip())
-	
-# 	plot_data = data[data["argument"].isin(top_arguments_found)]
-
-# 	sns.set_theme()
-# 	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
-# 	plt.xticks(rotation=45)
-# 	plt.show()
-
-# # Test 2: Compare performance of rf and drf optimizations
-# def solve_for_test_2():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	solve_problem_files(a, b, solve_timeout=60)
-# 	profiler.save()
-
-# def optimize_for_test_2():
-# 	""" See if refactor (rf) or dag-aware refactor (drf) is more effective """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	rw_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
-# 	drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
-# 	joint_args = list(map(lambda x: [x], rw_variants + drw_variants))
-# 	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
-# 	profiler.save()
-
-# def show_test_2(profiler: ProfilerData, n: int = 5):
-# 	""" Plots the top n best average rf and top n best average drf """
-# 	problem_files = get_target_problem_files(profiler)
-# 	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
-# 	rf_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
-# 	drf_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
-# 	optimize_arg_combos = list(map(lambda x: [x], rf_variants + drf_variants))
-	
-# 	raw_data = {
-# 		"solve_args": [],
-# 		"opt_arg_bases": [],
-# 		"opt_arg_flags": [],
-# 		"gains": [],
-# 		"times": []
-# 	}
-
-# 	for problem_file in problem_files:
-# 		for solve_attempt in problem_file["solve_attempts"]:
-# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
-# 			if not solve_attempt["data"]: continue
-
-# 			solve_args_used = " ".join(solve_attempt["args_used"])
-
-# 			base_and_count = solve_attempt["data"]["and_gates"]
-
-# 			for optimization in solve_attempt["optimizations"]:
-# 				if not optimization["args_used"] in optimize_arg_combos: continue
-# 				if len(optimization["args_used"]) != 1: raise Exception("Expected only one argument")
-
-# 				argument = optimization["args_used"][0]
-# 				arg_base: str = argument.split(" ")[0]
-# 				flags: str = " ".join(argument.split(" ")[1:])
-
-# 				new_and_count = optimization["data"]["and_gates"]
-# 				gain = base_and_count / new_and_count
-
-# 				raw_data["solve_args"].append(solve_args_used)
-# 				raw_data["opt_arg_bases"].append(arg_base)
-# 				raw_data["opt_arg_flags"].append(flags)
-# 				raw_data["gains"].append(gain)
-# 				raw_data["times"].append(optimization["optimize_time_python"])
-
-# 	data = pd.DataFrame(raw_data)
-
-# 	# Get average of each argument over each solution
-# 	averaged_gain_over_files = data.groupby(["opt_arg_bases", "opt_arg_flags"]).agg({"gains": "mean"})
-# 	# Get the top 5 of each argument base with the highest gain
-# 	top_argument_df = averaged_gain_over_files.sort_values("gains", ascending=False).groupby(["opt_arg_bases"]).head(5).sort_values("opt_arg_bases").reset_index()
-
-# 	top_arguments_found = list(top_argument_df["opt_arg_bases"] + " " + top_argument_df["opt_arg_flags"])
-	
-# 	# Add complete optimization argument as column
-# 	data["argument"] = (data["opt_arg_bases"] + " " + data["opt_arg_flags"]).apply(lambda x: x.strip())
-	
-# 	plot_data = data[data["argument"].isin(top_arguments_found)]
-
-# 	sns.set_theme()
-# 	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
-# 	plt.xticks(rotation=45)
-# 	plt.show()
-
-# # Test 3: Test if other optimizations are any good
-# def solve_for_test_3():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	solve_problem_files(a, b, solve_timeout=60)
-# 	profiler.save()
-
-# def optimize_for_test_3():
-# 	""" Test if one of the other optimization arguments are good. """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-
-# 	opt_args = []
-# 	for arg in ["drwsat", "rs", "dc2", "irw", "irws", "iresyn"]:
-# 		opt_args.extend(get_abc_argument_flag_combinations(arg, ABC_OPTIMIZATION_ARGUMENTS[arg], 3))
-# 	opt_args = list(map(lambda x: [x], opt_args))
-	
-# 	execute_optimizations_on_solutions(a, b, opt_args, timeout=60, n_threads=THREAD_COUNT)
-# 	profiler.save()
-
-# def show_test_3(profiler: ProfilerData):
-# 	pass # TODO: Implement this
-
-# # Test 4: Test balance performance. Probably not amazing
-# def solve_for_test_4():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	solve_problem_files(a, b, solve_timeout=60)
-# 	profiler.save()
-
-# def optimize_for_test_4():
-# 	""" Optimizes all target solutions with the balance optimization """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_problem_files(profiler, ".*arbiter.*")
-# 	b = get_target_solve_attempt_arguments()
-# 	balances = list(map(lambda x: [x], get_abc_argument_flag_combinations("b", ABC_OPTIMIZATION_ARGUMENTS["b"], 3)))
-# 	execute_optimizations_on_solutions(a, b, balances, timeout=60, n_threads=THREAD_COUNT)
-# 	profiler.save()
-
-# def show_test_4(profiler: ProfilerData):
-# 	pass # TODO: Implement this
-
-# # Test 5: Are extreme drw flags better than small normal drw flags?
-# def solve_for_test_5():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	solve_problem_files(a, b, solve_timeout=60)
-# 	profiler.save()
-
-# def optimize_for_test_5():
-# 	""" See if drw performs better with extremely big parameters """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	extreme_drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3, True)
-# 	joint_args = list(map(lambda x: [x], extreme_drw_variants))
-# 	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
-# 	profiler.save()
-
-# def show_test_5(profiler: ProfilerData):
-# 	pass # TODO: Implement
-
-# # Test 6: Are extreme drf flags better than small normal drf flags?
-# def solve_for_test_6():
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	solve_problem_files(a, b, solve_timeout=60)
-# 	profiler.save()
-
-# def optimize_for_test_6():
-# 	""" See if drf performs better with extremely big parameters """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	a = get_target_problem_files(profiler)
-# 	b = get_target_solve_attempt_arguments()
-# 	extreme_drw_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3, True)
-# 	joint_args = list(map(lambda x: [x], extreme_drw_variants))
-# 	execute_optimizations_on_solutions(a, b, joint_args, timeout=60, n_threads=THREAD_COUNT)
-# 	profiler.save()
-
-# def show_test_6(profiler: ProfilerData):
-# 	pass # TODO: Implement
-
-# # Chaining tests
-# def solve_for_test_5():
-# 	pass
-
-# def optimize_for_test_5():
-# 	""" Optimizes all to see if duplicate sequential optimizations make sense """
-# 	profiler = ProfilerData(PROFILER_SOURCE)
-# 	target_problem_files = get_problem_files(profiler, ".*arbiter.*")
-# 	target_solve_attempts = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-# 	target_optimization_arguments = get_duplication_optimization_arguments(list(ABC_OPTIMIZATION_ARGUMENTS.keys()), 4)
-# 	execute_optimizations_on_solutions(target_problem_files, target_solve_attempts, target_optimization_arguments, timeout=50)
-# 	profiler.save()
+# TODO: Implement this into get problem files
+# def get_small_problem_files(profiler: ProfilerData) -> list[dict]:
+# 	small = [
+# 		"ActionConverter",	# AIG size: 8
+# 		"amba_decomposed_arbiter_2",	# AIG size: 70
+# 		"amba_decomposed_arbiter_3",	# AIG size: 300
+# 		"amba_decomposed_decode",	# AIG size: 6
+# 		"arbiter_with_buffer",	# AIG size: 1
+# 		"Automata",	# AIG size: 70
+# 		"Automata32S",	# AIG size: 110
+# 		"Cockpitboard",	# AIG size: 15
+# 		"detector",	# AIG size: 50
+# 		"EnemeyModule",	# AIG size: 7
+# 		"EscalatorBidirectional",	# AIG size: 140
+# 		"EscalatorBidirectionalInit",	# AIG size: 150
+# 		"full_arbiter",	# AIG size: 150
+# 		"full_arbiter_2",	# AIG size: 50
+# 		"full_arbiter_3",	# AIG size: 300
+# 		"Gamelogic",	# AIG size: 80
+# 		"GamemodeChooser",	# AIG size: 100
+# 		"lilydemo10",	# AIG size: 7
+# 		"lilydemo17",	# AIG size: 100
+# 		"loadcomp3",	# AIG size: 200
+# 		"loadfull2",	# AIG size: 50
+# 		"ltl2dba_alpha",	# AIG size: 10
+# 		"ltl2dba_beta",	# AIG size: 140
+# 		"ltl2dba01",	# AIG size: 10
+# 		"MusicAppFeedback",	# AIG size: 30
+# 		"OneCounter",	# AIG size: 500
+# 		"prioritized_arbiter",	# AIG size: 30
+# 		"Scoreboard",	# AIG size: 10
+# 		"Sensor",	# AIG size: 300
+# 		"simple_arbiter",	# AIG size: 30
+# 		"Zoo0",	# AIG size: 20
+# 	]
+# 	targets = []
+# 	for wanted in small:
+# 		for problem_file in profiler.data["problem_files"]:
+# 			source = Path(problem_file["source"])
+# 			current = source.name.removesuffix("".join(source.suffixes))
+# 			if current == wanted:
+# 				targets.append(problem_file)
+# 				break
+
+# 	LOG("Selected: {} out of {} wanted problem files".format(len(targets), len(small)), VerbosityLevel.INFO)
+# 	return targets
 
 # ================================= Profiler Checkers ==================================== #
 
@@ -1585,9 +1186,9 @@ def fix_missing_attributes(profiler: ProfilerData):
 					LOG("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
 
-# =================== CLUSTER TESTS ======================= #
+# =================== TESTS ======================= #
 
-def do_cluster_stuff():
+def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float):
 	# 1. Initialize profiler
 	profiler = ProfilerData(PROFILER_SOURCE)
 	initialize_problem_files(profiler)
@@ -1597,21 +1198,21 @@ def do_cluster_stuff():
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 2. Solve all problem files
-	solve_all_problem_files(profiler)
+	solve_all_problem_files(profiler, solve_timeout_s)
 	profiler.save()
 	LOG("Solved all problem files!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 3. Perform test 1
-	cluster_test_1(profiler)
+	test_1(profiler, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 1: all optimizations once!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 4. Perform test 2
-	cluster_test_2(profiler)
+	test_2(profiler, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 2: all duos!", VerbosityLevel.INFO)
 
@@ -1620,83 +1221,83 @@ def do_cluster_stuff():
 	# 5 is procrastinated downwards!
 
 	# 6. Perform test 4
-	cluster_test_4(profiler)
+	test_4(profiler, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 4: cleanups on solutions!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 7. Perform test 5
-	cluster_test_5(profiler)
+	test_5(profiler, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 5: sandwiched cleanups!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 8. Perform test 6
-	cluster_test_6(profiler)
+	test_6(profiler, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 6: premade strategies!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 5. Perform test 3
-	cluster_test_3(profiler)
+	test_3(profiler, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 3: duplications!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 
-def solve_all_problem_files(profiler: ProfilerData):
+def solve_all_problem_files(profiler: ProfilerData, solve_timeout_s: float):
 	""" Will create a solution for every possible example problem file. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
-	solve_problem_files(problem_files, knor_flag_combos, solve_timeout_seconds=CLUSTER_SOLVE_TIMEOUT)
+	solve_problem_files(problem_files, knor_flag_combos, solve_timeout_seconds=solve_timeout_s)
 
-def cluster_test_1(profiler: ProfilerData):
+def test_1(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
 	""" Do all ABC optimizations once on each solution. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimizations = get_all_ABC_optimization_arguments(3)
 	optimization_combos = list(map(lambda x: [x], optimizations))
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def cluster_test_2(profiler: ProfilerData):
+def test_2(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
 	""" Do all ABC optimization duos on each solution. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimization_duos = get_all_ABC_optimization_duos(3)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_duos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def cluster_test_3(profiler: ProfilerData):
+def test_3(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
 	""" Do the duplication test: See if repeating same argument is effective. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	optimization_combos = get_ABC_optimization_duplication_combos(2, 4)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def cluster_test_4(profiler: ProfilerData):
+def test_4(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
 	""" Performs cleanup optimization commands on unoptimized solutions. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	cleanup_arguments = get_ABC_cleanup_arguments(3)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, cleanup_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def cluster_test_5(profiler: ProfilerData):
+def test_5(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
 	""" Sandwich cleanup arguments between optimization duos to see if it has actual effect. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	sandwiched_cleanups = get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(3)
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, sandwiched_cleanups, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, sandwiched_cleanups, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
-def cluster_test_6(profiler: ProfilerData):
+def test_6(profiler: ProfilerData, thread_count: int, optimize_timeout_s: float):
 	""" Perform all premade optimization strategies. """
 	problem_files = get_problem_files(profiler)
 	knor_flag_combos = get_knor_flag_combinations(KNOR_SYNTHESIZE_FLAGS, KNOR_SOLVE_FLAGS)
 	strategy_combos = get_ABC_premade_optimization_strategies()
-	execute_optimizations_on_solutions(problem_files, knor_flag_combos, strategy_combos, timeout_seconds=CLUSTER_OPTIMIZE_TIMEOUT, n_threads=CLUSTER_THREAD_COUNT)
+	execute_optimizations_on_solutions(problem_files, knor_flag_combos, strategy_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
 """
@@ -1740,3 +1341,197 @@ def cluster_test_6(profiler: ProfilerData):
 # ============================================================================
  
 # Plot sample example AIG sizes to see the distribution
+
+# def show_test_0():
+# 	profiler = ProfilerData(PROFILER_SOURCE)
+# 	solve_attempt_arg_combos = get_small_problem_files(profiler)
+
+# 	raw_data = {
+# 		"problem_file_source": [],
+# 		"solve_args": [],
+# 		"synthesize_args": [],
+# 		"solve_time": [],
+# 		"and_gates": [],
+# 		"increase": [] 	# Increase in size compared to baseline (smallest AIG per problem file)
+# 	}
+
+# 	# Collect the minimums
+# 	minimum_and_gates = {}
+# 	for problem_file in profiler.data["problem_files"]:
+# 		if problem_file["known_unrealizable"]: continue
+# 		for solve_attempt in problem_file["solve_attempts"]:
+# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+# 			if not solve_attempt["data"]: continue
+
+# 			source = problem_file["source"]
+# 			current_and_count = solve_attempt["data"]["and_gates"]
+# 			if source not in minimum_and_gates:
+# 				minimum_and_gates[source] = current_and_count
+# 			else:
+# 				minimum_and_gates[source] = min(minimum_and_gates[source], current_and_count) # At least 1 so we can compare
+	
+# 	# Compare each solution with the minimum (but not the 0 bests)
+# 	for problem_file in profiler.data["problem_files"]:
+# 		if problem_file["known_unrealizable"]: continue
+# 		for solve_attempt in problem_file["solve_attempts"]:
+# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+# 			if not solve_attempt["data"]: continue
+
+# 			source = problem_file["source"]
+# 			args_used = solve_attempt["args_used"]
+# 			solve_args = args_used[-2]
+# 			synthesize_args = args_used[:-2]
+# 			and_count = solve_attempt["data"]["and_gates"]
+# 			solve_time = solve_attempt["solve_time"]
+
+# 			minimum_of_this_file = minimum_and_gates[source]
+# 			if minimum_of_this_file == 0: continue
+
+# 			increase = and_count / minimum_and_gates[source]
+
+# 			raw_data["problem_file_source"].append(source)
+# 			raw_data["solve_args"].append(solve_args)
+# 			raw_data["synthesize_args"].append(synthesize_args)
+# 			raw_data["solve_time"].append(solve_time)
+# 			raw_data["and_gates"].append(and_count)
+# 			raw_data["increase"].append(increase)
+
+# 	df = pd.DataFrame(raw_data)
+
+# 	df["synthesize_str"] = df["synthesize_args"].apply(lambda x: str(x))
+
+# 	sns.set_theme()
+# 	sns.catplot(data=df, kind="boxen", x="solve_args", y="increase", hue="synthesize_str")
+# 	plt.xticks(rotation=45)
+# 	plt.show()
+
+
+# 	return df
+
+
+# ==============================================
+
+# def show_test_2(profiler: ProfilerData, n: int = 5):
+# 	""" Plots the top n best average rf and top n best average drf """
+# 	problem_files = get_target_problem_files(profiler)
+# 	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
+# 	rf_variants = get_abc_argument_flag_combinations("rf", ABC_OPTIMIZATION_ARGUMENTS["rf"], 3)
+# 	drf_variants = get_abc_argument_flag_combinations("drf", ABC_OPTIMIZATION_ARGUMENTS["drf"], 3)
+# 	optimize_arg_combos = list(map(lambda x: [x], rf_variants + drf_variants))
+	
+# 	raw_data = {
+# 		"solve_args": [],
+# 		"opt_arg_bases": [],
+# 		"opt_arg_flags": [],
+# 		"gains": [],
+# 		"times": []
+# 	}
+
+# 	for problem_file in problem_files:
+# 		for solve_attempt in problem_file["solve_attempts"]:
+# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+# 			if not solve_attempt["data"]: continue
+
+# 			solve_args_used = " ".join(solve_attempt["args_used"])
+
+# 			base_and_count = solve_attempt["data"]["and_gates"]
+
+# 			for optimization in solve_attempt["optimizations"]:
+# 				if not optimization["args_used"] in optimize_arg_combos: continue
+# 				if len(optimization["args_used"]) != 1: raise Exception("Expected only one argument")
+
+# 				argument = optimization["args_used"][0]
+# 				arg_base: str = argument.split(" ")[0]
+# 				flags: str = " ".join(argument.split(" ")[1:])
+
+# 				new_and_count = optimization["data"]["and_gates"]
+# 				gain = base_and_count / new_and_count
+
+# 				raw_data["solve_args"].append(solve_args_used)
+# 				raw_data["opt_arg_bases"].append(arg_base)
+# 				raw_data["opt_arg_flags"].append(flags)
+# 				raw_data["gains"].append(gain)
+# 				raw_data["times"].append(optimization["optimize_time_python"])
+
+# 	data = pd.DataFrame(raw_data)
+
+# 	# Get average of each argument over each solution
+# 	averaged_gain_over_files = data.groupby(["opt_arg_bases", "opt_arg_flags"]).agg({"gains": "mean"})
+# 	# Get the top 5 of each argument base with the highest gain
+# 	top_argument_df = averaged_gain_over_files.sort_values("gains", ascending=False).groupby(["opt_arg_bases"]).head(5).sort_values("opt_arg_bases").reset_index()
+
+# 	top_arguments_found = list(top_argument_df["opt_arg_bases"] + " " + top_argument_df["opt_arg_flags"])
+	
+# 	# Add complete optimization argument as column
+# 	data["argument"] = (data["opt_arg_bases"] + " " + data["opt_arg_flags"]).apply(lambda x: x.strip())
+	
+# 	plot_data = data[data["argument"].isin(top_arguments_found)]
+
+# 	sns.set_theme()
+# 	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
+# 	plt.xticks(rotation=45)
+# 	plt.show()
+
+
+# ================================================================
+
+# def show_test_1(profiler: ProfilerData, n: int = 5):
+# 	""" Plots the top n best average arguments for rw and drw. """
+# 	problem_files = get_target_problem_files(profiler)
+# 	solve_attempt_arg_combos = get_target_solve_attempt_arguments()
+# 	rw_variants = get_abc_argument_flag_combinations("rw", ABC_OPTIMIZATION_ARGUMENTS["rw"], 3)
+# 	drw_variants = get_abc_argument_flag_combinations("drw", ABC_OPTIMIZATION_ARGUMENTS["drw"], 3)
+# 	optimize_arg_combos = list(map(lambda x: [x], rw_variants + drw_variants))
+	
+# 	raw_data = {
+# 		"solve_args": [],
+# 		"opt_arg_bases": [],
+# 		"opt_arg_flags": [],
+# 		"gains": [],
+# 		"times": []
+# 	}
+
+# 	for problem_file in problem_files:
+# 		for solve_attempt in problem_file["solve_attempts"]:
+# 			if not solve_attempt["args_used"] in solve_attempt_arg_combos: continue
+# 			if not solve_attempt["data"]: continue
+
+# 			solve_args_used = " ".join(solve_attempt["args_used"])
+
+# 			base_and_count = solve_attempt["data"]["and_gates"]
+
+# 			for optimization in solve_attempt["optimizations"]:
+# 				if not optimization["args_used"] in optimize_arg_combos: continue
+# 				if len(optimization["args_used"]) != 1: raise Exception("Expected only one argument")
+
+# 				argument = optimization["args_used"][0]
+# 				arg_base: str = argument.split(" ")[0]
+# 				flags: str = " ".join(argument.split(" ")[1:])
+
+# 				new_and_count = optimization["data"]["and_gates"]
+# 				gain = base_and_count / new_and_count
+
+# 				raw_data["solve_args"].append(solve_args_used)
+# 				raw_data["opt_arg_bases"].append(arg_base)
+# 				raw_data["opt_arg_flags"].append(flags)
+# 				raw_data["gains"].append(gain)
+# 				raw_data["times"].append(optimization["optimize_time_python"])
+
+# 	data = pd.DataFrame(raw_data)
+
+# 	# Get average of each argument over each solution
+# 	averaged_gain_over_files = data.groupby(["opt_arg_bases", "opt_arg_flags"]).agg({"gains": "mean"})
+# 	# Get the top 5 of each argument base with the highest gain
+# 	top_argument_df = averaged_gain_over_files.sort_values("gains", ascending=False).groupby(["opt_arg_bases"]).head(5).sort_values("opt_arg_bases").reset_index()
+
+# 	top_arguments_found = list(top_argument_df["opt_arg_bases"] + " " + top_argument_df["opt_arg_flags"])
+	
+# 	# Add complete optimization argument as column
+# 	data["argument"] = (data["opt_arg_bases"] + " " + data["opt_arg_flags"]).apply(lambda x: x.strip())
+	
+# 	plot_data = data[data["argument"].isin(top_arguments_found)]
+
+# 	sns.set_theme()
+# 	sns.catplot(data=plot_data, kind="violin", x="opt_arg_flags", y="gains", hue="opt_arg_bases")
+# 	plt.xticks(rotation=45)
+# 	plt.show()

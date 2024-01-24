@@ -1,8 +1,3 @@
-MAX_TIME_SECONDS_FOR_KNOR_COMMAND = 120 # seconds
-MAX_TIME_SECONDS_FOR_OPTIMIZE_COMMAND = 120 # seconds
-
-REPETITION_TEST_MAX_REPETITION = 5
-
 # These flags can be combined
 # Order does not matter
 # No flag is a possibility too
