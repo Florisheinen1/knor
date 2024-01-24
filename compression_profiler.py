@@ -942,10 +942,17 @@ def get_problem_files(profiler: ProfilerData, test_size: TestSize) -> list[dict]
 	""" Returns a list of problem files whose name match the given regex, or all files if regex is None."""
 	all_problem_files = profiler.data["problem_files"]
 
-	if test_size == TestSize.Everything: return all_problem_files # All files
-	if test_size == TestSize.Big: return all_problem_files[::2][:len(all_problem_files[::2])] # Every other file
-	if test_size == TestSize.Medium: return all_problem_files[::5][:len(all_problem_files[::5])] # Every fifth file
-	if test_size == TestSize.Small: return all_problem_files[::20][:len(all_problem_files[::20])] # Every 20th file
+	target_problem_files = []
+	for problem_file in all_problem_files[::10][:len(all_problem_files[::10])]:
+		if problem_file["known_unrealizable"]: continue
+		target_problem_files.append(problem_file)
+
+	return target_problem_files
+
+	# if test_size == TestSize.Everything: return all_problem_files # All files
+	# if test_size == TestSize.Big: return all_problem_files[::2][:len(all_problem_files[::2])] # Every other file
+	# if test_size == TestSize.Medium: return all_problem_files[::5][:len(all_problem_files[::5])] # Every fifth file
+	# if test_size == TestSize.Small: return all_problem_files[::20][:len(all_problem_files[::20])] # Every 20th file
 
 # ================================= Profiler Checkers ==================================== #
 
