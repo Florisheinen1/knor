@@ -1108,7 +1108,6 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	profiler.save()
 	LOG("Initialized profiler!", VerbosityLevel.INFO)
 
-	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	LOG("Solving files...", VerbosityLevel.INFO)
@@ -1117,7 +1116,6 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	profiler.save()
 	LOG("Solved all problem files!", VerbosityLevel.INFO)
 
-	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 3. Perform test 1
@@ -1126,7 +1124,6 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	profiler.save()
 	LOG("Performed test 1: all optimizations once!", VerbosityLevel.INFO)
 
-	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	LOG("Performing opts2!", VerbosityLevel.INFO)
@@ -1135,7 +1132,6 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	profiler.save()
 	LOG("Performed test 2: all duos!", VerbosityLevel.INFO)
 
-	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 5 is procrastinated downwards!
