@@ -72,7 +72,7 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 	},
 	"drw": { # performs combinational AIG rewriting
 		"-C": {"default": 8, "min": 1, "max_pseudo": 1000},	# the max number of cuts at a node [default = 8]			// Limited due to laptop memory limitations
-		"-N": {"default": 5, "min": 0},	# the max number of subgraphs tried [default = 5]
+		"-N": {"default": 5, "min": 2},	# the max number of subgraphs tried [default = 5]
 		"-l": None,				# toggle preserving the number of levels [default = no]
 		# "-f": None,				# toggle representing fanouts [default = yes] 										// Conflicts with -l
 		"-z": None,				# toggle using zero-cost replacements [default = no]
