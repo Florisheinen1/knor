@@ -832,7 +832,7 @@ def get_ABC_argument_variations(argument_base: str, flags: dict | None, mutate: 
 
 def get_all_ABC_optimization_arguments(test_size: TestSize) -> list[str]:
 	""" Returns list of all individual ABC optimization commands and their variations. """
-	mutate_level = test_size.value
+	mutate_level = min(test_size.value, TestSize.Medium.value)
 
 	target_arguments = list(ABC_OPTIMIZATION_ARGUMENTS.keys())
 	if test_size == TestSize.Small: target_arguments = ["b", "drw", "drf"]
