@@ -34,6 +34,8 @@ CLUSTER_THREAD_COUNT = 16
 CLUSTER_SOLVE_TIMEOUT = 120 # seconds
 CLUSTER_OPTIMIZE_TIMEOUT = 60 # seconds
 
+LAST_TIME_SAVED = time.time()
+
 # To ensure the user does not stop the program during a critical part of the code,
 # KeyboardInterrupt exceptions will be handled through the following event flag
 KEYBOARD_INTERRUPT_HAS_BEEN_CALLED: threading.Event = threading.Event()
@@ -114,10 +116,13 @@ class ProfilerData:
 
 	# Saves current data to source file
 	def save(self):
+		global LAST_TIME_SAVED
 		LOG("WARNING: Saving profiler data. Do not quit... ", VerbosityLevel.INFO)
 		with open(self.source, 'w') as file:
 			json.dump(self.data, file, indent=3)
 		LOG("Saved results in '{}'".format(self.source), VerbosityLevel.INFO)
+		LAST_TIME_SAVED = time.time()
+
 
 def get_problem_file_paths() -> list[Path]:
 	""" Gets list of all problem file paths.
@@ -576,6 +581,7 @@ def execute_optimization_on_solution(
 		new_optimization_id += 1
 
 def execute_optimizations_on_solutions(
+		profiler: ProfilerData,
 		problem_files: list[dict],
 		solve_argument_combos: list[list[str]] | None,
 		optimization_argument_combos: list[list[str]],
@@ -583,7 +589,7 @@ def execute_optimizations_on_solutions(
 		n_threads: int = 1):
 	""" Optimizes the given solutions (or all if "None") of the given problem files with the given optimization arguments.\n
 		Performs optimizations on different threads on solution-level. """
-	global KEYBOARD_INTERRUPT_HAS_BEEN_CALLED
+	global KEYBOARD_INTERRUPT_HAS_BEEN_CALLED, LAST_TIME_SAVED
 
 	if n_threads < 1: raise Exception("Cannot perform optimization on no threads.")
 
@@ -682,6 +688,13 @@ def execute_optimizations_on_solutions(
 			if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set():
 				LOG("User aborted optimizing at problem file: '{}'".format(problem_file_source), VerbosityLevel.OFF)
 				return
+		
+		time_since_last_save = time.time() - LAST_TIME_SAVED
+		if time_since_last_save > 120:
+			LOG("More than 120 seconds passed: {:.2f}s. Saving".format(time_since_last_save), VerbosityLevel.OFF)
+			profiler.save()
+		else:
+			LOG("No 120 seconds have passed yet: {:.2f}s".format(time_since_last_save), VerbosityLevel.OFF)
 
 def status_worker_function(
 		finished_solutions: list[dict],
@@ -1184,21 +1197,21 @@ def test_1(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	optimizations = get_all_ABC_optimization_arguments(test_size)
 	optimization_combos = list(map(lambda x: [x], optimizations))
-	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 def test_2(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Do all ABC optimization duos on each solution. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	optimization_duos = get_all_ABC_optimization_duos(test_size)
-	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, optimization_duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, optimization_duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 def test_3(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Do the duplication test: See if repeating same argument is effective. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	optimization_combos = get_ABC_optimization_duplication_combos(test_size)
-	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 def test_4(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Performs cleanup optimization commands on unoptimized solutions. """
@@ -1206,21 +1219,21 @@ def test_4(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	cleanup_arguments = get_ABC_cleanup_arguments(3)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
-	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 def test_5(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Sandwich cleanup arguments between optimization duos to see if it has actual effect. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	sandwiched_cleanups = get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(test_size)
-	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, sandwiched_cleanups, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, sandwiched_cleanups, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 def test_6(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Perform all premade optimization strategies. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	strategy_combos = get_ABC_premade_optimization_strategies()
-	execute_optimizations_on_solutions(target_problem_files, target_knor_arg_combos, strategy_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, strategy_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
 """
