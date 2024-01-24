@@ -884,11 +884,12 @@ def get_ABC_optimization_duplication_combos(test_size: TestSize) -> list[list[st
 
 	return duplication_combos
 
-def get_ABC_cleanup_arguments(mutate: int) -> list[str]:
+def get_ABC_cleanup_arguments(test_size: TestSize) -> list[str]:
 	""" Returns list of all individual ABC cleanup commands and their variants. """
+	mutate_level = min(test_size.value, TestSize.Medium.value)
 	arguments: list[str] = []
 	for argument in ABC_CLEANUP_ARGUMENTS:
-		arguments.extend(get_ABC_argument_variations(argument, ABC_CLEANUP_ARGUMENTS[argument], mutate))
+		arguments.extend(get_ABC_argument_variations(argument, ABC_CLEANUP_ARGUMENTS[argument], mutate_level))
 	return arguments
 
 def get_all_ABC_cleanup_arguments(test_size) -> list[str]:
@@ -1217,7 +1218,7 @@ def test_4(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 	""" Performs cleanup optimization commands on unoptimized solutions. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
-	cleanup_arguments = get_ABC_cleanup_arguments(3)
+	cleanup_arguments = get_ABC_cleanup_arguments(test_size)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
 	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
