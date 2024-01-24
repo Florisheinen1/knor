@@ -74,8 +74,10 @@ class TestSize(Enum):
 	Big = 3				# Half of problem files, 	3 mutations, 4 repetitions
 	Everything = 4		# All problem files, 		4 mutations, 5 repetitions
 
-LOG_VERBOSITY_LEVEL = VerbosityLevel.WARNING
+LOG_VERBOSITY_LEVEL = VerbosityLevel.INFO
 LOG_TO_TQDM = True
+
+LOG_FILE_SOURCE = Path("logs.txt")
 
 def LOG(message: str, message_verbosity_level: VerbosityLevel):
 	global LOG_VERBOSITY_LEVEL, LOG_TO_TQDM
@@ -85,12 +87,16 @@ def LOG(message: str, message_verbosity_level: VerbosityLevel):
 	if message_verbosity_level == VerbosityLevel.WARNING: prefix = "WARNING"
 	if message_verbosity_level == VerbosityLevel.INFO: prefix = "INFO"
 	if message_verbosity_level == VerbosityLevel.DETAIL: prefix = "DETAIL"
+	log_text = "[{}]: {}".format(prefix, message)
 
 	if message_verbosity_level.value <= LOG_VERBOSITY_LEVEL.value:
 		# Then we print it!
-		log_text = "[{}]: {}".format(prefix, message)
 		if LOG_TO_TQDM: tqdm.write(log_text)
 		else: print(log_text)
+
+	if message_verbosity_level.value <= VerbosityLevel.INFO.value:
+		with open(LOG_FILE_SOURCE, "a") as file:
+			file.write("{}\n".format(log_text))
 
 class ProfilerData:
 	def __init__(self, source: Path):
@@ -1239,7 +1245,7 @@ def test_6(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 # ///////// # TODO: Collect better argument flag combinations (perhaps in reproducible way)
 # ///////// # TODO: Collect argument combinations per plan.
 # ///////// # TODO: Figure out why some argumen flag combinations do not work
-# TODO: Improve logging for better debugging
+# /// # TODO: Improve logging for better debugging
 
 # TODO: Make solving also parrallel
 
