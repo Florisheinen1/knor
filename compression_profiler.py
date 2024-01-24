@@ -746,7 +746,7 @@ def optimize_worker_function(
 def get_knor_flag_combinations(test_size: TestSize, binary_out: bool = True) -> list[list[str]]:
 	""" Returns a list of all argument combinations to give to Knor.
 		If binary_out is False, '-a' will be appended instead '-b'."""
-	if test_size == TestSize.Small: return [["--sym"]] # Only with small test sizes, immediately return '--sym'
+	if test_size == TestSize.Small: return [["--sym", "-b"]] # Only with small test sizes, immediately return '--sym'
 
 	# Get all possible combinations of knor args
 	knor_flag_combinations = []
@@ -1102,32 +1102,40 @@ def fix_missing_attributes(profiler: ProfilerData):
 
 def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float, test_size: TestSize):
 	# 1. Initialize profiler
+	LOG("Intializing profiler...", VerbosityLevel.INFO)
 	profiler = ProfilerData(PROFILER_SOURCE)
 	initialize_problem_files(profiler)
 	profiler.save()
 	LOG("Initialized profiler!", VerbosityLevel.INFO)
 
+	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
+	LOG("Solving files...", VerbosityLevel.INFO)
 	# 2. Solve all problem files
 	solve_all_problem_files(profiler, test_size, solve_timeout_s)
 	profiler.save()
 	LOG("Solved all problem files!", VerbosityLevel.INFO)
 
+	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 3. Perform test 1
+	LOG("Performing opts!", VerbosityLevel.INFO)
 	test_1(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 1: all optimizations once!", VerbosityLevel.INFO)
 
+	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
+	LOG("Performing opts2!", VerbosityLevel.INFO)
 	# 4. Perform test 2
 	test_2(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
 	LOG("Performed test 2: all duos!", VerbosityLevel.INFO)
 
+	input("Press enter to continue")
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# 5 is procrastinated downwards!
