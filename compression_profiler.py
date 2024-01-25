@@ -125,10 +125,23 @@ class ProfilerData:
 	def save(self):
 		global LAST_TIME_SAVED
 		LOG("WARNING: Saving profiler data. Do not quit... ", VerbosityLevel.INFO)
+		LOG_PROGRESS("Saving profiler data. Do not stop program now...")
 		with open(self.source, 'w') as file:
 			json.dump(self.data, file, indent=3)
 		LOG("Saved results in '{}'".format(self.source), VerbosityLevel.INFO)
+		LOG_PROGRESS("Done saving profiler data.")
 		LAST_TIME_SAVED = time.time()
+
+	def backup(self, name: str):
+		now = datetime.now()
+		moment_str: str = "{}-{}-{}_{}-{}-{}".format(now.year, now.month, now.day, now.hour, now.minute, now.second)
+		output_file = Path("backup_{}_{}.json".format(name, moment_str))
+		LOG("Creating backup at: '{}'...".format(output_file), VerbosityLevel.INFO)
+		LOG_PROGRESS("Creating backup at: '{}'...".format(output_file))
+		with open(output_file, "w") as file:
+			json.dump(self.data, file)
+		LOG("Created backup.", VerbosityLevel.INFO)
+		LOG_PROGRESS("Created backup.")
 
 
 def get_problem_file_paths() -> list[Path]:
@@ -706,9 +719,7 @@ def execute_optimizations_on_solutions(
 		time_since_last_save = time.time() - LAST_TIME_SAVED
 		if time_since_last_save > 120:
 			LOG("More than 120 seconds passed: {:.2f}s. Saving".format(time_since_last_save), VerbosityLevel.OFF)
-			LOG_PROGRESS(" -> Saving as well... ")
 			profiler.save()
-			LOG_PROGRESS(" -> Done saving ")
 		else:
 			LOG("No 120 seconds have passed yet: {:.2f}s".format(time_since_last_save), VerbosityLevel.OFF)
 
@@ -1161,6 +1172,7 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	LOG("Performing opts!", VerbosityLevel.INFO)
 	test_1(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
+	profiler.backup("TEST1")
 	LOG("Performed test 1: all optimizations once!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
@@ -1169,6 +1181,7 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	# 4. Perform test 2
 	test_2(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
+	profiler.backup("TEST2")
 	LOG("Performed test 2: all duos!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
@@ -1178,6 +1191,7 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	# 6. Perform test 4
 	test_4(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
+	profiler.backup("TEST4")
 	LOG("Performed test 4: cleanups on solutions!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
@@ -1185,6 +1199,7 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	# 7. Perform test 5
 	test_5(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
+	profiler.backup("TEST5")
 	LOG("Performed test 5: sandwiched cleanups!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
@@ -1192,6 +1207,7 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	# 8. Perform test 6
 	test_6(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
+	profiler.backup("TEST6")
 	LOG("Performed test 6: premade strategies!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
@@ -1199,6 +1215,7 @@ def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: floa
 	# 5. Perform test 3
 	test_3(profiler, test_size, thread_count, optimize_timeout_s)
 	profiler.save()
+	profiler.backup("TEST3")
 	LOG("Performed test 3: duplications!", VerbosityLevel.INFO)
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
