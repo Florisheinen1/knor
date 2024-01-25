@@ -15,6 +15,7 @@ from profiler_arguments import *
 from tqdm import tqdm
 import threading
 import signal
+from datetime import datetime
 
 ABC_BINARY = Path("build/_deps/abc-build/abc")
 ABC_ALIAS_SOURCE = Path("build/_deps/abc-src/abc.rc")
@@ -99,6 +100,12 @@ def LOG(message: str, message_verbosity_level: VerbosityLevel):
 	if message_verbosity_level.value <= VerbosityLevel.INFO.value:
 		with open(LOG_FILE_SOURCE, "a") as file:
 			file.write("{}\n".format(log_text))
+
+def LOG_PROGRESS(message: str):
+	now = datetime.now()
+	prefix = "[{}:{}:{}]:".format(now.hour, now.minute, now.second)
+	with open("progress.txt", "a") as file:
+		file.write("{} {}\n".format(prefix, message))
 
 class ProfilerData:
 	def __init__(self, source: Path):
@@ -596,13 +603,19 @@ def execute_optimizations_on_solutions(
 	# Ensure base folder for optimization results exists
 	if not MINIMIZED_AIG_FOLDER.is_dir(): MINIMIZED_AIG_FOLDER.mkdir()
 	
+	_N_PROBLEMS = len(problem_files)
+	_I_PROBLEM = 0
+	LOG_PROGRESS("Starting to optimize solutions...")
 	for problem_file in tqdm(problem_files, desc="problem files", position=0):
+		_I_PROBLEM += 1
 		if problem_file["known_unrealizable"]:
 			LOG("Skipping unrealizable problem file: '{}', as it cannot be optimized".format(problem_file["source"]), VerbosityLevel.INFO)
 			continue # We cannot optimize unrealizable solutions
 
+
 		# Ensure problem file specific output folder
 		problem_file_source = Path(problem_file["source"])
+		LOG_PROGRESS(" -> {}/{}: Optimizing: '{}'".format(_I_PROBLEM, _N_PROBLEMS, problem_file_source))
 		problem_folder = MINIMIZED_AIG_FOLDER / problem_file_source.name.rstrip("".join(problem_file_source.suffixes))
 		if not problem_folder.is_dir(): problem_folder.mkdir()
 
@@ -689,6 +702,7 @@ def execute_optimizations_on_solutions(
 				LOG("User aborted optimizing at problem file: '{}'".format(problem_file_source), VerbosityLevel.OFF)
 				return
 		
+		LOG_PROGRESS(" -> {}/{}: Stopped optimizing: '{}'".format(_I_PROBLEM, _N_PROBLEMS, problem_file_source))
 		time_since_last_save = time.time() - LAST_TIME_SAVED
 		if time_since_last_save > 120:
 			LOG("More than 120 seconds passed: {:.2f}s. Saving".format(time_since_last_save), VerbosityLevel.OFF)
@@ -750,6 +764,8 @@ def optimize_worker_function(
 
 			# This argument combo needs to be applied on the picked solution
 			execute_optimization_on_solution(target_solution, argument_combo, solution_output_folder, optimize_timeout_seconds)
+		
+		LOG_PROGRESS("    -> Optimized all of solution: {}".format(arguments_used_for_solution))
 
 		# Now add the solution we were optimizing to the finished pile
 		with finished_list_mutex:
