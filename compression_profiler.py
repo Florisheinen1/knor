@@ -70,6 +70,12 @@ class SolveProblemFileWorth(Enum):
 	NO_TIMED_OUT = "timed-out"
 	NO_ALREADY_SOLVED = "already solved"
 
+class OptimizeResult(Enum):
+	SUCCESS = 1
+	CRASHED = 2
+	TIMEOUT = 3
+	INTERRUPTED = 4
+
 # Indicates how extensive the tests need to be
 class TestSize(Enum):
 	Small = 1			# Few problem files,		1 mutation,  3 repetitions
@@ -254,6 +260,27 @@ def run_shell_command(cmd: str, timeout_seconds: float | None, allow_keyboard_in
 		# Otherwise, we just need to wait a tiny bit longer
 		time.sleep(0.01)
 
+def run_ABC_optimization_command(command: str, timeout_seconds: float | None) -> tuple[OptimizeResult, dict | None]:
+	""" Runs the given ABC optimization command. Returns after timeout or keyboard interrupt. """
+	result_type, result_data = run_shell_command(command, timeout_seconds, True)
+
+	if result_type == ShellCommandResult.INTERRUPTED: return OptimizeResult.INTERRUPTED, None
+	elif result_type == ShellCommandResult.TIMEOUT: return OptimizeResult.TIMEOUT, None
+	
+	# At this point, the command executed without giving back error code. Whether it successfully optimized is something we need to determine
+
+	# If we do not have return data, something terrible happened!
+	if not result_data or not result_data.stdout:
+		LOG("Optimize command executed properly, but failed to retrieve command result!", VerbosityLevel.ERROR)
+		return OptimizeResult.CRASHED, None
+	
+	output = result_data.stdout.read().decode()
+	parsed_stats = parse_aig_read_stats_output(output)
+
+	# If the output does not contain stats of an AIG, the optimization command crashed for some reason (perhaps incorrect flags)
+	if not parsed_stats: return OptimizeResult.CRASHED, None
+
+	return OptimizeResult.SUCCESS, parsed_stats
 
 def parse_aig_read_stats_output(cmd_output: str) -> dict | None:
 	""" Parses AIG stats from given output of a shell command.\n
@@ -552,25 +579,18 @@ def execute_optimization_on_solution(
 		command = create_abc_optimization_command(source_file, [argument], output_file)
 
 		optimize_start = time.time()
-		result_type, result = run_shell_command(command, optimize_timeout_seconds, False)
+		result_type, stats = run_ABC_optimization_command(command, optimize_timeout_seconds)
 		optimize_time = time.time() - optimize_start
 
-		if result_type == ShellCommandResult.TIMEOUT:
-			# We can no longer continue this optimization path, so return
+		if result_type == OptimizeResult.INTERRUPTED:
+			LOG("Aborted while optimizing with {} on solution {} after {:.2f}s.".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.OFF)
+			return
+		elif result_type == OptimizeResult.TIMEOUT:
 			LOG("Timed out optimizing with {} on solution {} after {:.2f}s.".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.WARNING)
-			return
-		
-		stats: dict | None = None
-		if result and result.stdout:
-			output = result.stdout.read().decode()
-			stats = parse_aig_read_stats_output(output)
-			if not stats:
-				# That means we did not time out, but ABC gave an error
-				LOG("ABC command crashed on: \n{}".format(command), VerbosityLevel.ERROR)
-		
-		if not result:
-			LOG("Did not get result from optimizing with {} on solution {} after {:.2f}s".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.ERROR)
-			return
+		elif result_type == OptimizeResult.CRASHED:
+			LOG("Crashed optimizing with {} on solution {} after {:.2f}s.".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.ERROR)
+		else:
+			LOG("Successfully optimized with {} on solution {} after {:.2f}s.".format(arguments_build_up, solution["args_used"], optimize_time), VerbosityLevel.DETAIL)
 		
 		# If we retry optimization, update previous one. Otherwise, append it
 		if previous_optimize_attempt:
@@ -579,7 +599,8 @@ def execute_optimization_on_solution(
 			previous_optimize_attempt["args_used"] = arguments_build_up
 			previous_optimize_attempt["optimize_time_python"] = optimize_time
 			previous_optimize_attempt["actual_optimize_time"] = None
-			previous_optimize_attempt["timed_out"] = result == None
+			previous_optimize_attempt["timed_out"] = result_type == OptimizeResult.TIMEOUT
+			previous_optimize_attempt["crashed"] = result_type == OptimizeResult.CRASHED
 			previous_optimize_attempt["data"] = stats
 			previous_optimize_attempt["id"] = new_optimization_id
 			LOG("Retried optimization {} of {}".format(arguments_build_up, solution["args_used"]), VerbosityLevel.INFO)
@@ -590,7 +611,8 @@ def execute_optimization_on_solution(
 				"args_used": arguments_build_up.copy(),
 				"optimize_time_python": optimize_time,
 				"actual_optimize_time": None,
-				"timed_out": result == None,
+				"timed_out": result_type == OptimizeResult.TIMEOUT,
+				"crashed": result_type == OptimizeResult.CRASHED,
 				"data": stats,
 				"id": new_optimization_id
 			}
@@ -1033,6 +1055,8 @@ def check_optimization_structure(optimization: dict,
 	# Actual optimize time may be None
 	if not "timed_out" in optimization: raise Exception("Missing 'timed_out' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
 	if not isinstance(optimization["timed_out"], bool): raise Exception("Invalid type for 'timed_out' in opt {} of source: {}".format(opt_args_used, source))
+	if not "crashed" in optimization: raise Exception("Missing 'crashed' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
+	if not isinstance(optimization["crashed"], bool): raise Exception("Invalid type for 'crashed' in opt {} of source: {}".format(opt_args_used, source))
 	if not "id" in optimization: raise Exception("Missing 'id' attrbibute in optimization {} of source: {}".format(opt_args_used, source))
 	if not isinstance(optimization["id"], int): raise Exception("Invalid type for 'id' in opt {} of source: {}".format(opt_args_used, source))
 
@@ -1081,11 +1105,13 @@ def check_solve_attempt_structure(solve_attempt: dict,
 	for optimization in solve_attempt["optimizations"]:
 		check_optimization_structure(optimization, handled_optimization_args, handled_optimization_ids, "solution {} of problem file '{}'".format(solve_args_used, source))
 
-def check_problem_file_structure_correctness(problem_files: list[dict]):
+def check_profiler_structure_correctness(profiler: ProfilerData):
 	""" Prints all errors of the given profilers data."""
+	profiler = ProfilerData(PROFILER_SOURCE)
+
 	handled_problem_file_sources: list[str] = []
 
-	for problem_file in problem_files:
+	for problem_file in profiler.data["problem_files"]:
 		if not "source" in problem_file: raise Exception("Missing 'source' attribute in problem file")
 		if not type(problem_file["source"]) is str: raise Exception("Problem file 'source' type was not str")
 
@@ -1105,10 +1131,6 @@ def check_problem_file_structure_correctness(problem_files: list[dict]):
 				check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
 
 	LOG("Finished checking profiler structure correctness", VerbosityLevel.INFO)
-
-def check_profiler_structure():
-	profiler = ProfilerData(PROFILER_SOURCE)
-	check_problem_file_structure_correctness(profiler.data["problem_files"])
 
 def fix_missing_attributes(profiler: ProfilerData):
 	problem_files = get_problem_files(profiler, TestSize.Everything)
