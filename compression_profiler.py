@@ -313,14 +313,13 @@ def get_aig_stats_from_file(file: Path) -> dict | None:
 		Returns None if failed to parse AIG.\n
 		Cannot be interrupted by KeyboardInterrupts. """
 	abc_read_cmd = "./{} -c 'read {}; print_stats'".format(ABC_BINARY, file)
-	_, result = run_shell_command(abc_read_cmd, AIG_PARSE_TIMEOUT_SECONDS, allow_keyboard_interrupts=False)
+	result_type, result = run_shell_command(abc_read_cmd, AIG_PARSE_TIMEOUT_SECONDS, allow_keyboard_interrupts=False)
 	
-	if result is None:
-		LOG("Reading AIG timed out. Please increase AIG_PARSE_TIMEOUT_SECONDS.", VerbosityLevel.ERROR)
-		return None
+	if result_type == ShellCommandResult.INTERRUPTED: return None
+	elif result_type == ShellCommandResult.TIMEOUT: return None
 	
-	if not result.stdout:
-		LOG("Failed to get STDOUT of AIG parse command.", VerbosityLevel.ERROR)
+	if not result or not result.stdout:
+		LOG("Reading AIG command succeeded, but failed to get output.", VerbosityLevel.ERROR)
 		return None
 
 	shell_output = result.stdout.read().decode()
@@ -1034,7 +1033,7 @@ def check_aig_data_structure(data: dict, source: str):
 	if not isinstance(data["outputs"], int): raise Exception("AIG data had invalid 'outputs' attribute of source: {}".format(source))
 
 def check_optimization_structure(optimization: dict,
-								 handled_optimization_args: list[list[str]],
+								 handled_optimization_args: list[str],
 								 handled_optimization_ids: list[int],
 								 source: str):
 	if not "args_used" in optimization: raise Exception("Missing 'args_used' attribute in optimization of source: {}".format(source))
@@ -1042,8 +1041,8 @@ def check_optimization_structure(optimization: dict,
 	if not all(isinstance(x, str) for x in optimization["args_used"]): raise Exception("Invalid argument of 'args_used' in optimization of source: {}".format(source))
 
 	opt_args_used = optimization["args_used"]
-	if opt_args_used in handled_optimization_args: raise Exception("Optimization duplicated: {} of source: {}".format(opt_args_used, source))
-	handled_optimization_args.append(opt_args_used)
+	if "".join(opt_args_used) in handled_optimization_args: raise Exception("Optimization duplicated: {} of source: {}".format(opt_args_used, source))
+	handled_optimization_args.append("".join(opt_args_used))
 
 	if not "command_used" in optimization: raise Exception("Missing 'command_used' attrbibute in optimization of source: {}".format(opt_args_used, source))
 	if not isinstance(optimization["command_used"], str): raise Exception("Invalid type for 'command_used' in opt {} of source: {}".format(opt_args_used, source))
@@ -1072,14 +1071,14 @@ def check_optimization_structure(optimization: dict,
 		check_aig_data_structure(optimization["data"], "optimization {} of {}".format(opt_args_used, source))
 
 def check_solve_attempt_structure(solve_attempt: dict,
-								  handled_solve_attempt_args: list[list[str]],
+								  handled_solve_attempt_args: list[str],
 								  source: str):
 	if not "args_used" in solve_attempt: raise Exception("Missing 'args_used' attribute in solve attempt of '{}'".format(source))
 	if not type(solve_attempt["args_used"]) is list: raise Exception("Problem file '{}' had solution with invalid type for 'args_used' instead of list".format(source))
 	
 	solve_args_used = solve_attempt["args_used"]
-	if solve_args_used in handled_solve_attempt_args: raise Exception("Solve attempt duplicated: {} for '{}'".format(solve_args_used, source))
-	handled_solve_attempt_args.append(solve_args_used)
+	if "".join(solve_args_used) in handled_solve_attempt_args: raise Exception("Solve attempt duplicated: {} for '{}'".format(solve_args_used, source))
+	handled_solve_attempt_args.append("".join(solve_args_used))
 
 	if not all(isinstance(x, str) for x in solve_args_used): raise Exception("Problem file '{}' had solve attempt with invalid type in 'args_used' instead of str".format(source))
 
@@ -1099,10 +1098,11 @@ def check_solve_attempt_structure(solve_attempt: dict,
 	if not "optimizations" in solve_attempt: raise Exception("Missing 'optimizations' attribute in solve attempt of '{}' with args {}".format(source, solve_args_used))
 	if not isinstance(solve_attempt["optimizations"], list): raise Exception("Solve attempt of '{}' with args {} had invalid type for 'optimizations' instead of list".format(source, solve_args_used))
 
-	handled_optimization_args: list[list[str]] = []
+	handled_optimization_args: list[str] = []
 	handled_optimization_ids: list[int] = []
 
 	for optimization in solve_attempt["optimizations"]:
+		if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 		check_optimization_structure(optimization, handled_optimization_args, handled_optimization_ids, "solution {} of problem file '{}'".format(solve_args_used, source))
 
 def check_profiler_structure_correctness(profiler: ProfilerData):
@@ -1112,6 +1112,8 @@ def check_profiler_structure_correctness(profiler: ProfilerData):
 	handled_problem_file_sources: list[str] = []
 
 	for problem_file in profiler.data["problem_files"]:
+		if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+
 		if not "source" in problem_file: raise Exception("Missing 'source' attribute in problem file")
 		if not type(problem_file["source"]) is str: raise Exception("Problem file 'source' type was not str")
 
@@ -1124,21 +1126,25 @@ def check_profiler_structure_correctness(profiler: ProfilerData):
 		if not "solve_attempts" in problem_file: raise Exception("Missing 'solve_attempts' attribute in '{}'".format(source))
 		if not type(problem_file["solve_attempts"]) is list: raise Exception("Problem file '{}' had invalid type for 'solve_attempts' instead of list".format(source))
 
-		handled_solve_attempt_args: list[list[str]] = []
+		handled_solve_attempt_args: list[str] = []
 
 		if not problem_file["known_unrealizable"]:
 			for solve_attempt in problem_file["solve_attempts"]:
+				if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 				check_solve_attempt_structure(solve_attempt, handled_solve_attempt_args, "problem file '{}'".format(source))
 
 	LOG("Finished checking profiler structure correctness", VerbosityLevel.INFO)
 
-def fix_missing_attributes(profiler: ProfilerData):
-	problem_files = get_problem_files(profiler, TestSize.Everything)
-	for problem_file in tqdm(problem_files, desc="problem files", position=0):
+def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
+	for problem_file in tqdm(profiler.data["problem_files"], desc="problem files", position=0, leave=False, disable=not use_tqdm):
+		if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+		
 		if problem_file["known_unrealizable"]: continue
 
 		source = problem_file["source"]
-		for solve_attempt in tqdm(problem_file["solve_attempts"], desc="solve_attempt", position=1):
+		for solve_attempt in tqdm(problem_file["solve_attempts"], desc="solve_attempt", leave=False, position=1, disable=not use_tqdm):
+			if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+			
 			if not "data" in solve_attempt:
 				solve_attempt["data"] = None
 				LOG("Added 'data' attribute to: {} of {}".format(solve_attempt["args_used"], source), VerbosityLevel.INFO)
@@ -1156,8 +1162,13 @@ def fix_missing_attributes(profiler: ProfilerData):
 				solve_attempt["optimizations"] = []
 				LOG("Added empty optimizations list to solve attempt {} of problem {}".format(solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
-			for optimization in solve_attempt["optimizations"]:
-				if optimization["timed_out"]: continue
+			for optimization in tqdm(solve_attempt["optimizations"], desc="optimization", position=2, leave=False, disable=not use_tqdm):
+				if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+
+				if "crashed" not in optimization:
+					optimization["crashed"] = False
+
+				if optimization["timed_out"] or optimization["crashed"]: continue
 				
 				if not "data" in optimization:
 					optimization["data"] = None
@@ -1165,9 +1176,13 @@ def fix_missing_attributes(profiler: ProfilerData):
 				if not optimization["data"]:
 					# Then this optimization needs to have data!
 					stats = get_aig_stats_from_file(optimization["output_file"])
-					if not stats: print("Should have data, but failed to get stats in optimization: {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source))
-					optimization["data"] = stats
-					LOG("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source), VerbosityLevel.INFO)
+					if not stats:
+						# If we failed to parse it, it probably was a crashed optimization
+						LOG("Added crashed: True", VerbosityLevel.INFO)
+						optimization["crashed"] = True
+					else:
+						optimization["data"] = stats
+						LOG("Read and set AIG stats of opt {} of solution {} of problem '{}'".format(optimization["args_used"], solve_attempt["args_used"], source), VerbosityLevel.INFO)
 
 
 # =================== TESTS ======================= #
