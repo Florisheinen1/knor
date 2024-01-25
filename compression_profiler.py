@@ -542,10 +542,12 @@ def execute_optimization_on_solution(
 		
 		# If previous optimization attempt exists, only continue if it makes sense to try it again
 		if previous_optimize_attempt:
-			# If previous optimization was successful, we can go to the next argument
-			if not previous_optimize_attempt["timed_out"]: continue
+			# If previous attempt crashed, there is no use trying again
+			if previous_optimize_attempt["crashed"]: return
+			# Continue to next argument if we already did it
+			if not previous_optimize_attempt["timed_out"] and previous_optimize_attempt["data"]: continue
+			# Otherwise, retry iff we have bigger timeout this time
 
-			# If previous attempt timed out and we do not have more time than then, this optimization cannot be done
 			if optimize_timeout_seconds <= previous_optimize_attempt["optimize_time_python"]:
 				LOG("Cannot improve timed out optimize attempt {} on {}".format(arguments_build_up, solution["args_used"]), VerbosityLevel.INFO)
 				return
@@ -1347,6 +1349,14 @@ def test_6(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 
 # ============================================================================
  
+"""
+I want to compare each indivual command
+
+
+
+"""
+
+
 # Plot sample example AIG sizes to see the distribution
 
 # def show_test_0():
