@@ -706,7 +706,9 @@ def execute_optimizations_on_solutions(
 		time_since_last_save = time.time() - LAST_TIME_SAVED
 		if time_since_last_save > 120:
 			LOG("More than 120 seconds passed: {:.2f}s. Saving".format(time_since_last_save), VerbosityLevel.OFF)
+			LOG_PROGRESS(" -> Saving as well... ")
 			profiler.save()
+			LOG_PROGRESS(" -> Done saving ")
 		else:
 			LOG("No 120 seconds have passed yet: {:.2f}s".format(time_since_last_save), VerbosityLevel.OFF)
 
