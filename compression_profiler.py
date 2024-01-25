@@ -1107,8 +1107,6 @@ def check_solve_attempt_structure(solve_attempt: dict,
 
 def check_profiler_structure_correctness(profiler: ProfilerData):
 	""" Prints all errors of the given profilers data."""
-	profiler = ProfilerData(PROFILER_SOURCE)
-
 	handled_problem_file_sources: list[str] = []
 
 	for problem_file in profiler.data["problem_files"]:
