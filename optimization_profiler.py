@@ -1189,16 +1189,21 @@ def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize)
 	profiler.backup("3_AFTER_TEST_2")
 	profiler.save()
 
+	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+
 	# Do cleanup bois
 	test_4(profiler, TestSize.Big, thread_count, optimize_timeout_s)
 	profiler.backup("3_AFTER_TEST_4")
 	profiler.save()
+
+	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 	# Do strategies
 	test_6(profiler, TestSize.Big, thread_count, optimize_timeout_s)
 	profiler.backup("3_AFTER_TEST_6")
 	profiler.save()
 
+	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
 
 
 
