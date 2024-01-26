@@ -1187,6 +1187,15 @@ def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
 
 # =================== TESTS ======================= #
 
+def do_test_2(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
+	profiler = ProfilerData(PROFILER_SOURCE)
+	a: tuple[pd.DataFrame, pd.DataFrame, list[str]] = get_test1_data(profiler, test_size)
+
+	test_2_decreased(profiler, a[2], test_size, thread_count, optimize_timeout_s)
+	profiler.backup("AFTER_TEST_2")
+	profiler.save()
+	
+
 def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float, test_size: TestSize):
 	# 1. Initialize profiler
 	LOG("Intializing profiler...", VerbosityLevel.INFO)
@@ -1278,6 +1287,20 @@ def test_2(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	optimization_duos = get_all_ABC_optimization_duos(test_size)
 	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, optimization_duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+
+def test_2_decreased(profiler: ProfilerData, target_abc_args: list[str], test_size: TestSize, thread_count: int, optimize_timeout_s: float):
+	""" Do all ABC optimization duos on each solution. """
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	
+	duos: list[list[str]] = []
+	for first in target_abc_args:
+		for second in target_abc_args:
+			duo = [first, second]
+			duos.append(duo)
+	
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, duos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
+
 
 def test_3(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
 	""" Do the duplication test: See if repeating same argument is effective. """
@@ -1515,7 +1538,10 @@ def get_test1_data(profiler: ProfilerData, test_size: TestSize):
 	
 	plot_data.to_csv(Path("TEST_1_RESULTS.csv"))
 
-	return df, plot_data
+	test_2_n = int(round(len(sorted_args_with_gains) / 2))
+	test_2_args = sorted_args_with_gains["opt_args"].values[:test_2_n]
+
+	return df, plot_data, list(test_2_args)
 
 
 
