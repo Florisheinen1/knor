@@ -25,15 +25,11 @@ UNMINIMIZED_AIG_FOLDER = Path("aigs_unminimized")
 MINIMIZED_AIG_FOLDER = Path("aigs_minimized")
 PROBLEM_FILES_FOLDER = Path("examples")
 
-PROFILER_SOURCE = Path("profiler.json")
+PROFILER_SOURCE = Path("profiler_3_try.json")
+PROGRESS_SOURCE = Path("progress_3_try.txt")
+LOG_FILE_SOURCE = Path("logs_3_try.txt")
 
 AIG_PARSE_TIMEOUT_SECONDS = 20 # seconds
-
-# Threads used for executing optimizations in parralell
-THREAD_COUNT = 3
-CLUSTER_THREAD_COUNT = 16
-CLUSTER_SOLVE_TIMEOUT = 120 # seconds
-CLUSTER_OPTIMIZE_TIMEOUT = 60 # seconds
 
 LAST_TIME_SAVED = time.time()
 
@@ -86,8 +82,6 @@ class TestSize(Enum):
 LOG_VERBOSITY_LEVEL = VerbosityLevel.INFO
 LOG_TO_TQDM = True
 
-LOG_FILE_SOURCE = Path("logs.txt")
-
 def LOG(message: str, message_verbosity_level: VerbosityLevel):
 	global LOG_VERBOSITY_LEVEL, LOG_TO_TQDM
 
@@ -110,7 +104,7 @@ def LOG(message: str, message_verbosity_level: VerbosityLevel):
 def LOG_PROGRESS(message: str):
 	now = datetime.now()
 	prefix = "[{}:{}:{}]:".format(now.hour, now.minute, now.second)
-	with open("progress.txt", "a") as file:
+	with open(PROGRESS_SOURCE, "a") as file:
 		file.write("{} {}\n".format(prefix, message))
 
 class ProfilerData:
@@ -1186,15 +1180,27 @@ def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
 
 
 # =================== TESTS ======================= #
-
-def do_test_2(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
+def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
 	profiler = ProfilerData(PROFILER_SOURCE)
 	a: tuple[pd.DataFrame, pd.DataFrame, list[str]] = get_test1_data(profiler, test_size)
 
+	# Do duos
 	test_2_decreased(profiler, a[2], test_size, thread_count, optimize_timeout_s)
-	profiler.backup("AFTER_TEST_2")
+	profiler.backup("3_AFTER_TEST_2")
 	profiler.save()
-	
+
+	# Do cleanup bois
+	test_4(profiler, TestSize.Big, thread_count, optimize_timeout_s)
+	profiler.backup("3_AFTER_TEST_4")
+	profiler.save()
+
+	# Do strategies
+	test_6(profiler, TestSize.Big, thread_count, optimize_timeout_s)
+	profiler.backup("3_AFTER_TEST_6")
+	profiler.save()
+
+
+
 
 def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float, test_size: TestSize):
 	# 1. Initialize profiler
