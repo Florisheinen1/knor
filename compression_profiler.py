@@ -133,7 +133,7 @@ class ProfilerData:
 		LOG("WARNING: Saving profiler data. Do not quit... ", VerbosityLevel.INFO)
 		LOG_PROGRESS("Saving profiler data. Do not stop program now...")
 		with open(self.source, 'w') as file:
-			json.dump(self.data, file, indent=3)
+			json.dump(self.data, file)
 		LOG("Saved results in '{}'".format(self.source), VerbosityLevel.INFO)
 		LOG_PROGRESS("Done saving profiler data.")
 		LAST_TIME_SAVED = time.time()
@@ -1066,7 +1066,7 @@ def check_optimization_structure(optimization: dict,
 
 	if not "data" in optimization: raise Exception("Missing 'data' attribute in optimization {} of source: {}".format(opt_args_used, source))
 	
-	if optimization["timed_out"]:
+	if optimization["timed_out"] or optimization["crashed"]:
 		if isinstance(optimization["data"], dict): raise Exception("Failed optimization still has data in optimization {} of source: {}".format(opt_args_used, source))
 	else:
 		if not isinstance(optimization["data"], dict): raise Exception("Successful optimization does not have data in optimization {} of source: {}".format(opt_args_used, source))
@@ -1355,6 +1355,169 @@ I want to compare each indivual command
 
 
 """
+
+def get_crashes_or_incompletes(problem_files: list[dict], knor_args: list[list[str]], opt_args: list[list[str]]) -> tuple[
+		list[str], # Crashed files
+		list[str], # Crashed solve args
+		list[str], # Crashed opt args
+		list[str], # Missing files
+		list[str], # Missing solve args
+		list[str], # Missing opt args
+		]:
+	target_problem_files = [file["source"] for file in problem_files]
+	target_knor_args = ["".join(arg_combo) for arg_combo in knor_args]
+	target_opt_args = ["".join(arg_combo) for arg_combo in opt_args]
+
+	crashed_problem_files: list[str] = []
+	crashed_knor_args: list[str] = []
+	crashed_opt_args: list[str] = []
+	missing_problem_files: list[str] = []
+	missing_knor_args: list[str] = []
+	missing_opt_args: list[str] = []
+
+	# Keep track of the files that are realizable
+	succeeded_problem_files: list[str] = []
+
+	for problem_file in problem_files:
+		source = problem_file["source"]
+		# Only check target problem files
+		if source not in target_problem_files: continue
+		# If file has been unrealizable before or missing before, skip this one
+		if source in crashed_problem_files or source in missing_problem_files: continue
+
+		# If this file is unrealizable, remember it
+		if problem_file["known_unrealizable"]:
+			crashed_problem_files.append(source)
+			LOG("Problem file: '{}' is unrealizable".format(source), VerbosityLevel.WARNING)
+			continue
+
+		# Remember that this file succeeded
+		succeeded_problem_files.append(source)
+		
+		# Keep track of the solve attempts that succeeded
+		succeeded_solve_args = []
+
+		for solve_attempt in problem_file["solve_attempts"]:
+			knor_args_used = "".join(solve_attempt["args_used"])
+			# Only check target solve attempts
+			if knor_args_used not in target_knor_args: continue
+			# If we know these knor args have previously crashed or were missing, dont care about them then
+			if knor_args_used in crashed_knor_args or knor_args_used in missing_knor_args: continue
+			
+			# If these knor_args have crashed or timed out, remember it
+			if solve_attempt["crashed"] or solve_attempt["timed_out"]:
+				crashed_knor_args.append(knor_args_used)
+				reason = "crashed" if solve_attempt["crashed"] else "timed out"
+				LOG("Knor args: {} have {}".format(knor_args_used, reason), VerbosityLevel.WARNING)
+				continue
+			
+			# Remember that these solve args succeeded
+			succeeded_solve_args.append(knor_args_used)
+
+			# Keep track of successful optimization argument combos
+			succeeded_opt_args: list[str] = []
+
+			for optimization in solve_attempt["optimizations"]:
+				opt_args_used = "".join(optimization["args_used"])
+				# Only check target opt args
+				if opt_args_used not in target_opt_args: continue
+				# Skip if we already know these opt args have previously crashed or missed
+				if opt_args_used in missing_opt_args or opt_args_used in crashed_opt_args: continue
+
+				# If these opt args have crashed or timed out, remember it
+				if optimization["crashed"] or optimization["timed_out"]:
+					crashed_opt_args.append(opt_args_used)
+					LOG("Optimization: {} crashed".format(opt_args_used), VerbosityLevel.WARNING)
+					continue
+
+				# Remember that these opt args succeeded
+				succeeded_opt_args.append(opt_args_used)
+
+			for opt_arg in target_opt_args:
+				test = "".join(opt_arg)
+				# If it is one of the crashes or missing ones, we do not care
+				if test in crashed_opt_args or test in missing_opt_args: continue
+				# Otherwise, it should have succeeded!
+				if not test in succeeded_opt_args:
+					LOG("Did not (yet) perform optimization: {}".format(test), VerbosityLevel.WARNING)
+					missing_opt_args.append(test)
+			
+		
+		for knor_arg in target_knor_args:
+			test = "".join(knor_arg)
+			# If it is one of the crashes or missing ones, we do not care
+			if test in crashed_knor_args or test in missing_knor_args: continue
+			# But if it did not crash and is not missing yet, it should have succeeded
+			if test not in succeeded_solve_args:
+				LOG("Did not (yet) perform solve attempt with: {}".format(test), VerbosityLevel.WARNING)
+				missing_knor_args.append(test)
+
+	for problem_file in problem_files:
+		source = problem_file["source"]
+		# If this is one of the failed or missing problem files, ignore this one
+		if source in crashed_problem_files or source in missing_problem_files: continue
+		# But if this one should have succeeded, check if it actually did
+		if source not in succeeded_problem_files:
+			LOG("Did not (yet) solve problem file: '{}'".format(source), VerbosityLevel.WARNING)
+			missing_problem_files.append(source)
+
+	return crashed_problem_files, crashed_knor_args, crashed_opt_args, missing_problem_files, missing_knor_args, missing_opt_args
+
+
+def get_test1_data(profiler: ProfilerData, test_size: TestSize):
+	target_problem_files: list[dict] = get_problem_files(profiler, test_size)
+	target_knor_arg_combos: list[list[str]] = get_knor_flag_combinations(test_size)
+	all_optimizations: list[str] = get_all_ABC_optimization_arguments(test_size)
+	target_opt_arg_combos: list[list[str]] = list(map(lambda x: [x], all_optimizations))
+
+	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, target_opt_arg_combos)
+
+	succeeded_problem_files: list[str] = [file["source"] for file in target_problem_files if file["source"] not in crashed_files and file["source"] not in missing_files]
+	succeeded_solve_args: list[str] = ["".join(args) for args in target_knor_arg_combos if "".join(args) not in crashed_knor_args and "".join(args) not in missing_knor_args]
+	succeeded_opt_args: list[str] = ["".join(args) for args in target_opt_arg_combos if "".join(args) not in crashed_opt_args and "".join(args) not in missing_opt_args]
+
+	for problem_file in succeeded_problem_files:
+		LOG("Using problem file: '{}'".format(problem_file), VerbosityLevel.OFF)
+	for solve_arg in succeeded_solve_args:
+		LOG("Using solve args: {}".format(solve_arg), VerbosityLevel.OFF)
+	for opt_arg in succeeded_opt_args:
+		LOG("Using opt args: {}".format(opt_arg), VerbosityLevel.OFF)
+
+	# Collect all optimization args and their corresponding gain that they created
+	raw_data = {
+		"opt_args": [],
+		"gain": []
+	}
+
+	for problem_file in target_problem_files:
+		if problem_file["source"] not in succeeded_problem_files: continue
+		for solve_attempt in problem_file["solve_attempts"]:
+			if "".join(solve_attempt["args_used"]) not in succeeded_solve_args: continue
+
+			initial_AND_count: int = solve_attempt["data"]["and_gates"]
+
+			for optimization in solve_attempt["optimizations"]:
+				arg_used = "".join(optimization["args_used"])
+				if arg_used not in succeeded_opt_args: continue
+
+				current_AND_count: int = optimization["data"]["and_gates"]
+				gain = initial_AND_count / current_AND_count
+
+				raw_data["opt_args"].append(arg_used)
+				raw_data["gain"].append(gain)
+
+	# Now, pick the best N arguments!
+	df = pd.DataFrame(raw_data)
+	sorted_args_with_gains = df.groupby(["opt_args"]).agg({"gain": "median"}).sort_values(["gain"], ascending=False).reset_index()
+	best_n_args = 20
+	best_args = sorted_args_with_gains["opt_args"].values[:best_n_args]
+	plot_data = df[df["opt_args"].isin(best_args)].reset_index()
+	
+	plot_data.to_csv(Path("TEST_1_RESULTS.csv"))
+
+	return df, plot_data
+
+
 
 
 # Plot sample example AIG sizes to see the distribution
