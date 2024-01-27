@@ -1180,9 +1180,15 @@ def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
 
 
 # =================== TESTS ======================= #
+# TEST: Balance before each opt command -> 6 hours
+# TEST: Cleanup after each opt command -> 6 hours
+
+
+
+
 def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
 	profiler = ProfilerData(PROFILER_SOURCE)
-	a: tuple[pd.DataFrame, pd.DataFrame, list[str]] = get_test1_data(profiler, test_size)
+	a: tuple[pd.DataFrame, pd.DataFrame, list[str]] = get_test_1_data(profiler, test_size)
 
 	# Do cleanup bois
 	test_4(profiler, TestSize.Big, thread_count, optimize_timeout_s)
@@ -1494,11 +1500,24 @@ def get_crashes_or_incompletes(problem_files: list[dict], knor_args: list[list[s
 		if source not in succeeded_problem_files:
 			LOG("Did not (yet) solve problem file: '{}'".format(source), VerbosityLevel.WARNING)
 			missing_problem_files.append(source)
+	
+	ok_problem_files: int = len(succeeded_problem_files)
+	ok_knor_args: int = len(target_knor_args) - len(crashed_knor_args) - len(missing_knor_args)
+	ok_abc_args: int = len(target_opt_args) - len(crashed_opt_args) - len(missing_opt_args)
+
+	LOG("OK problem files: {}/{}, OK knor args: {}/{}. OK ABC args: {}/{}".format(
+		ok_problem_files, 
+		len(target_problem_files), 
+		ok_knor_args, 
+		len(target_knor_args), 
+		ok_abc_args, 
+		len(target_opt_args)
+		), VerbosityLevel.INFO)
 
 	return crashed_problem_files, crashed_knor_args, crashed_opt_args, missing_problem_files, missing_knor_args, missing_opt_args
 
 
-def get_test1_data(profiler: ProfilerData, test_size: TestSize):
+def get_test_1_data(profiler: ProfilerData, test_size: TestSize):
 	target_problem_files: list[dict] = get_problem_files(profiler, test_size)
 	target_knor_arg_combos: list[list[str]] = get_knor_flag_combinations(test_size)
 	all_optimizations: list[str] = get_all_ABC_optimization_arguments(test_size)
@@ -1510,12 +1529,12 @@ def get_test1_data(profiler: ProfilerData, test_size: TestSize):
 	succeeded_solve_args: list[str] = ["".join(args) for args in target_knor_arg_combos if "".join(args) not in crashed_knor_args and "".join(args) not in missing_knor_args]
 	succeeded_opt_args: list[str] = ["".join(args) for args in target_opt_arg_combos if "".join(args) not in crashed_opt_args and "".join(args) not in missing_opt_args]
 
-	for problem_file in succeeded_problem_files:
-		LOG("Using problem file: '{}'".format(problem_file), VerbosityLevel.OFF)
-	for solve_arg in succeeded_solve_args:
-		LOG("Using solve args: {}".format(solve_arg), VerbosityLevel.OFF)
-	for opt_arg in succeeded_opt_args:
-		LOG("Using opt args: {}".format(opt_arg), VerbosityLevel.OFF)
+	# for problem_file in succeeded_problem_files:
+	# 	LOG("Using problem file: '{}'".format(problem_file), VerbosityLevel.OFF)
+	# for solve_arg in succeeded_solve_args:
+	# 	LOG("Using solve args: {}".format(solve_arg), VerbosityLevel.OFF)
+	# for opt_arg in succeeded_opt_args:
+	# 	LOG("Using opt args: {}".format(opt_arg), VerbosityLevel.OFF)
 
 	# Collect all optimization args and their corresponding gain that they created
 	raw_data = {
@@ -1524,15 +1543,21 @@ def get_test1_data(profiler: ProfilerData, test_size: TestSize):
 	}
 
 	for problem_file in target_problem_files:
-		if problem_file["source"] not in succeeded_problem_files: continue
+		if problem_file["source"] not in succeeded_problem_files:
+			LOG("Skipping required problem file data!", VerbosityLevel.ERROR)
+			continue
 		for solve_attempt in problem_file["solve_attempts"]:
-			if "".join(solve_attempt["args_used"]) not in succeeded_solve_args: continue
+			if "".join(solve_attempt["args_used"]) not in succeeded_solve_args:
+				LOG("Skipping required knor opt data!", VerbosityLevel.ERROR)
+				continue
 
 			initial_AND_count: int = solve_attempt["data"]["and_gates"]
 
 			for optimization in solve_attempt["optimizations"]:
 				arg_used = "".join(optimization["args_used"])
-				if arg_used not in succeeded_opt_args: continue
+				if arg_used not in succeeded_opt_args:
+					LOG("Skipping required ABC opt data!", VerbosityLevel.ERROR)
+					continue
 
 				current_AND_count: int = optimization["data"]["and_gates"]
 				gain = initial_AND_count / current_AND_count
@@ -1555,11 +1580,58 @@ def get_test1_data(profiler: ProfilerData, test_size: TestSize):
 	return df, plot_data, list(test_2_args)
 
 
+def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
+	""" Data of cleanup optimization commands on unoptimized solutions. """
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	cleanup_arguments = get_ABC_cleanup_arguments(test_size)
+	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
+
+	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, cleanup_combos)
+
+	raw_data = {
+		"opt_args": [],
+		"gain": []
+	}
+
+	for problem_file in target_problem_files:
+		source = problem_file["source"]
+		if source in crashed_files or source in missing_files:
+			LOG("Skipping required problem file data!", VerbosityLevel.ERROR)
+			continue
+
+		for solve_attempt in problem_file["solve_attempt"]:
+			knor_args_used = "".join(solve_attempt)
+			if knor_args_used in crashed_knor_args or knor_args_used in missing_knor_args:
+				LOG("Skipping required Knor program arg data", VerbosityLevel.ERROR)
+				continue
+
+			original_AND_gate_count = solve_attempt["data"]["and_gates"]
+
+			for optimization in solve_attempt["optimizations"]:
+				abc_args_used = "".join(optimization["args_used"])
+				if abc_args_used in crashed_opt_args or abc_args_used in missing_opt_args:
+					LOG("Skipping required ABC program arg data", VerbosityLevel.ERROR)
+					continue
+
+				new_AND_gate_count = optimization["data"]["and_gates"]
+				gain = original_AND_gate_count / new_AND_gate_count
+
+				raw_data["opt_args"].append(abc_args_used)
+				raw_data["gain"].append(gain)
+
+	return pd.DataFrame(raw_data)
+				
+
+	
+
 # =============================================================
 
 
-def plot_test_1():
-	df = pd.read_csv(Path("TEST_1_PLOT_DATA.csv"))
+def plot_test_1(test_size: TestSize = TestSize.Big):
+	profiler = ProfilerData(PROFILER_SOURCE)
+	df, _, _ = get_test_1_data(profiler, test_size)
+	# df = pd.read_csv(Path("TEST_1_PLOT_DATA.csv"))
 	df.groupby(["opt_args"]).agg({"gain": "median"})
 
 	sorted_order = df.groupby(["opt_args"]).agg({"gain":"median"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:20]
@@ -1574,8 +1646,6 @@ def plot_test_1():
 	plt.xticks(rotation=45)
 	
 	# TODO: Specify to use LaTeX font
-
-	
 
 	plt.show()
 
