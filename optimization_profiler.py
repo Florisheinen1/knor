@@ -962,40 +962,25 @@ def get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(test_size: TestSiz
 			sandwiched_triples.append(triple)
 	return sandwiched_triples
 
-def get_ABC_premade_optimization_strategies() -> list[list[str]]:
-	""" Returns a list of all argument combos from already existing optimization strategies. """
-	strategies: list[list[str]] = [
-		# c2rs
-		["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
-		# compress
-		["b -l", "rw -l", "rwz -l", "b -l", "rwz -l", "b -l"],
-		# compress2
-		["b -l", "rw -l", "rf -l", "b -l", "rw -l", "rwz -l", "b -l", "rfz -l", "rwz -l", "b -l"],
-		# compress2rs
-		["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
-		# drwsat2
-		["st", "drw", "b -l", "drw", "drf", "ifraig -C 20", "drw", "b -l", "drw", "drf"],
-		# r2rs
-		["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
-		# resyn
-		["b", "rw", "rwz", "b", "rwz", "b"],
-		# resyn2
-		["b", "rw", "rf", "b", "rw", "rwz", "b", "rfz", "rwz", "b"],
-		# resyn2a
-		["b", "rw", "b", "rw", "rwz", "b", "rwz", "b"],
-		# resyn2rs
-		["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
-		# resyn3
-		["b", "rs", "rs -K 6", "b", "rsz", "rsz -K 6", "b", "rsz -K 5", "b"],
-		# rwsat
-		["st", "rw -l", "b -l", "rw -l", "rf -l"],
-		# src_rs
-		["st", "rs -K 6 -N 2 -l", "rs -K 9 -N 2 -l", "rs -K 12 -N 2 -l"],
-		# src_rw
-		["st", "rw -l", "rwz -l", "rwz -l"],
-		# src_rws
-		["st", "rw -l", "rs -K 6 -N 2 -l", "rwz -l", "rs -K 9 -N 2 -l", "rwz -l", "rs -K 12 -N 2 -l"],
-	]
+def get_ABC_premade_optimization_strategies() -> dict[str, list[str]]:
+	""" Returns a dict of all already existing optimization strategies names with their list of optimization commands. """
+	strategies: dict[str, list[str]] = {
+		"c2rs":			["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
+		"compress":		["b -l", "rw -l", "rwz -l", "b -l", "rwz -l", "b -l"],
+		"compress2":	["b -l", "rw -l", "rf -l", "b -l", "rw -l", "rwz -l", "b -l", "rfz -l", "rwz -l", "b -l"],
+		"compress2rs":	["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
+		"drwsat2":		["st", "drw", "b -l", "drw", "drf", "ifraig -C 20", "drw", "b -l", "drw", "drf"],
+		"r2rs":			["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
+		"resyn":		["b", "rw", "rwz", "b", "rwz", "b"],
+		"resyn2":		["b", "rw", "rf", "b", "rw", "rwz", "b", "rfz", "rwz", "b"],
+		"resyn2a":		["b", "rw", "b", "rw", "rwz", "b", "rwz", "b"],
+		"resyn2rs":		["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
+		"resyn3":		["b", "rs", "rs -K 6", "b", "rsz", "rsz -K 6", "b", "rsz -K 5", "b"],
+		"rwsat":		["st", "rw -l", "b -l", "rw -l", "rf -l"],
+		"src_rs":		["st", "rs -K 6 -N 2 -l", "rs -K 9 -N 2 -l", "rs -K 12 -N 2 -l"],
+		"src_rw":		["st", "rw -l", "rwz -l", "rwz -l"],
+		"src_rws":		["st", "rw -l", "rs -K 6 -N 2 -l", "rwz -l", "rs -K 9 -N 2 -l", "rwz -l", "rs -K 12 -N 2 -l"],
+	}
 	return strategies
 
 def get_problem_files(profiler: ProfilerData, test_size: TestSize) -> list[dict]:
@@ -1345,7 +1330,7 @@ def test_6(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 	""" Perform all premade optimization strategies. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
-	strategy_combos = get_ABC_premade_optimization_strategies()
+	strategy_combos = list(get_ABC_premade_optimization_strategies().values())
 	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, strategy_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
@@ -1622,7 +1607,6 @@ def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
 
 	return pd.DataFrame(raw_data)
 				
-
 	
 
 # =============================================================
