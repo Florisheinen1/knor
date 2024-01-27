@@ -1184,13 +1184,6 @@ def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize)
 	profiler = ProfilerData(PROFILER_SOURCE)
 	a: tuple[pd.DataFrame, pd.DataFrame, list[str]] = get_test1_data(profiler, test_size)
 
-	# Do duos
-	test_2_decreased(profiler, a[2], test_size, thread_count, optimize_timeout_s)
-	profiler.backup("3_AFTER_TEST_2")
-	profiler.save()
-
-	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
-
 	# Do cleanup bois
 	test_4(profiler, TestSize.Big, thread_count, optimize_timeout_s)
 	profiler.backup("3_AFTER_TEST_4")
@@ -1201,6 +1194,13 @@ def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize)
 	# Do strategies
 	test_6(profiler, TestSize.Big, thread_count, optimize_timeout_s)
 	profiler.backup("3_AFTER_TEST_6")
+	profiler.save()
+
+	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
+
+	# Do duos
+	test_2_decreased(profiler, a[2], test_size, thread_count, optimize_timeout_s)
+	profiler.backup("3_AFTER_TEST_2")
 	profiler.save()
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
@@ -1555,7 +1555,31 @@ def get_test1_data(profiler: ProfilerData, test_size: TestSize):
 	return df, plot_data, list(test_2_args)
 
 
+# =============================================================
 
+
+def plot_test_1():
+	df = pd.read_csv(Path("TEST_1_PLOT_DATA.csv"))
+	df.groupby(["opt_args"]).agg({"gain": "median"})
+
+	sorted_order = df.groupby(["opt_args"]).agg({"gain":"median"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:20]
+
+	fitting_data = df[df["opt_args"].isin(sorted_order)]
+
+	sns.set_theme()
+	plotted = sns.catplot(data=fitting_data, kind="boxen", x="opt_args", y="gain", order=sorted_order)
+	
+	plotted.set(xlabel="ABC optimization command", ylabel="gain")
+	
+	plt.xticks(rotation=45)
+	
+	# TODO: Specify to use LaTeX font
+
+	
+
+	plt.show()
+
+	return df
 
 # Plot sample example AIG sizes to see the distribution
 
