@@ -1607,6 +1607,62 @@ def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
 
 	return pd.DataFrame(raw_data)
 				
+def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
+	""" Data of all premade optimization strategies. """
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	target_strategies = get_ABC_premade_optimization_strategies()
+
+	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, list(target_strategies.values()))
+
+	raw_data = {
+		"optimization_strategy": [],
+		"optimization_step": [],
+		"and_gates_after": [],
+	}
+
+	for problem_file in target_problem_files:
+		source = problem_file["source"]
+		if source in crashed_files or source in missing_files:
+			LOG("Skipping required problem file data!", VerbosityLevel.ERROR)
+			continue
+		for solve_attempt in problem_file["solve_attempts"]:
+			knor_args_used = "".join(solve_attempt["args_used"])
+			if knor_args_used in crashed_knor_args or knor_args_used in missing_knor_args:
+				LOG("Skipping required knor args data!", VerbosityLevel.ERROR)
+				continue
+			
+			base_AND_count = solve_attempt["data"]["and_gates"]
+
+			for strategy in target_strategies:
+				strategy_args = target_strategies[strategy]
+				strategy_args_str: str = "".join(strategy_args)
+				if strategy_args_str in crashed_opt_args or strategy_args_str in missing_opt_args:
+					LOG("Skipping required strategy data {}!".format(strategy), VerbosityLevel.ERROR)
+					continue
+				
+				# Start with the base entry
+				raw_data["optimization_strategy"].append(strategy)
+				raw_data["optimization_step"].append(0)
+				raw_data["and_gates_after"].append(base_AND_count)
+
+				for step in range(1, len(strategy_args)):
+					built_up = strategy_args[:step]
+
+					matching_opt = get_optimization_with_args(solve_attempt["optimizations"], built_up)
+					if not matching_opt:
+						LOG("Skipping required optimization: {}".format(built_up), VerbosityLevel.ERROR)
+						continue
+
+					# We found it!
+					raw_data["optimization_strategy"].append(strategy)
+					raw_data["optimization_step"].append(step)
+					raw_data["and_gates_after"].append(matching_opt["data"]["and_gates"])
+
+	df = pd.DataFrame(raw_data)
+	return df
+
+
 	
 
 # =============================================================
