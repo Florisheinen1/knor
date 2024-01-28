@@ -1574,6 +1574,10 @@ def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
 
 	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, cleanup_combos)
 
+	succeeded_problem_files: list[str] = [file["source"] for file in target_problem_files if file["source"] not in crashed_files and file["source"] not in missing_files]
+	succeeded_solve_args: list[str] = ["".join(args) for args in target_knor_arg_combos if "".join(args) not in crashed_knor_args and "".join(args) not in missing_knor_args]
+	succeeded_opt_args: list[str] = ["".join(args) for args in cleanup_combos if "".join(args) not in crashed_opt_args and "".join(args) not in missing_opt_args]
+
 	raw_data = {
 		"opt_args": [],
 		"gain": []
@@ -1581,22 +1585,19 @@ def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
 
 	for problem_file in target_problem_files:
 		source = problem_file["source"]
-		if source in crashed_files or source in missing_files:
-			LOG("Skipping required problem file data!", VerbosityLevel.ERROR)
+		if source not in succeeded_problem_files:
 			continue
 
-		for solve_attempt in problem_file["solve_attempt"]:
-			knor_args_used = "".join(solve_attempt)
-			if knor_args_used in crashed_knor_args or knor_args_used in missing_knor_args:
-				LOG("Skipping required Knor program arg data", VerbosityLevel.ERROR)
+		for solve_attempt in problem_file["solve_attempts"]:
+			knor_args_used = "".join(solve_attempt["args_used"])
+			if knor_args_used not in succeeded_solve_args:
 				continue
 
 			original_AND_gate_count = solve_attempt["data"]["and_gates"]
 
 			for optimization in solve_attempt["optimizations"]:
 				abc_args_used = "".join(optimization["args_used"])
-				if abc_args_used in crashed_opt_args or abc_args_used in missing_opt_args:
-					LOG("Skipping required ABC program arg data", VerbosityLevel.ERROR)
+				if abc_args_used not in succeeded_opt_args:
 					continue
 
 				new_AND_gate_count = optimization["data"]["and_gates"]
@@ -1615,21 +1616,25 @@ def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 
 	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, list(target_strategies.values()))
 
+	succeeded_problem_files: list[str] = [file["source"] for file in target_problem_files if file["source"] not in crashed_files and file["source"] not in missing_files]
+	succeeded_solve_args: list[str] = ["".join(args) for args in target_knor_arg_combos if "".join(args) not in crashed_knor_args and "".join(args) not in missing_knor_args]
+	succeeded_opt_args: list[str] = ["".join(args) for args in target_strategies.values() if "".join(args) not in crashed_opt_args and "".join(args) not in missing_opt_args]
+
 	raw_data = {
 		"optimization_strategy": [],
 		"optimization_step": [],
 		"and_gates_after": [],
+		"argument_performed": []
 	}
 
 	for problem_file in target_problem_files:
 		source = problem_file["source"]
-		if source in crashed_files or source in missing_files:
-			LOG("Skipping required problem file data!", VerbosityLevel.ERROR)
+		if source not in succeeded_problem_files:
+			LOG("Skipping required problem file data: {}".format(source), VerbosityLevel.ERROR)
 			continue
 		for solve_attempt in problem_file["solve_attempts"]:
 			knor_args_used = "".join(solve_attempt["args_used"])
-			if knor_args_used in crashed_knor_args or knor_args_used in missing_knor_args:
-				LOG("Skipping required knor args data!", VerbosityLevel.ERROR)
+			if knor_args_used not in succeeded_solve_args:
 				continue
 			
 			base_AND_count = solve_attempt["data"]["and_gates"]
@@ -1637,27 +1642,28 @@ def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 			for strategy in target_strategies:
 				strategy_args = target_strategies[strategy]
 				strategy_args_str: str = "".join(strategy_args)
-				if strategy_args_str in crashed_opt_args or strategy_args_str in missing_opt_args:
-					LOG("Skipping required strategy data {}!".format(strategy), VerbosityLevel.ERROR)
+				if strategy_args_str not in succeeded_opt_args:
 					continue
 				
 				# Start with the base entry
 				raw_data["optimization_strategy"].append(strategy)
 				raw_data["optimization_step"].append(0)
 				raw_data["and_gates_after"].append(base_AND_count)
+				raw_data["argument_performed"].append("SOLVE")
 
 				for step in range(1, len(strategy_args)):
 					built_up = strategy_args[:step]
 
 					matching_opt = get_optimization_with_args(solve_attempt["optimizations"], built_up)
 					if not matching_opt:
-						LOG("Skipping required optimization: {}".format(built_up), VerbosityLevel.ERROR)
+						LOG("Could not find necessary optimization: {}".format(built_up), VerbosityLevel.ERROR)
 						continue
 
 					# We found it!
 					raw_data["optimization_strategy"].append(strategy)
 					raw_data["optimization_step"].append(step)
 					raw_data["and_gates_after"].append(matching_opt["data"]["and_gates"])
+					raw_data["argument_performed"].append(built_up[-1])
 
 	df = pd.DataFrame(raw_data)
 	return df
