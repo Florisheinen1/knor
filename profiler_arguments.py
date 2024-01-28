@@ -55,12 +55,6 @@ KNOR_SOLVE_FLAGS = [
 ABC_FLAG_LIMIT = 100000000000 # Much higher than this will crash ABC (probably due to overflow)
 
 ABC_OPTIMIZATION_ARGUMENTS = {
-	"b": { # transforms the current network into a well-balanced AIG
-		"-l": None,			# toggle minimizing the number of levels [default = yes]
-		"-d": None,			# toggle duplication of logic [default = no]
-		"-s": None,			# toggle duplication on the critical paths [default = no]
-		"-x": None,			# toggle balancing multi-input EXORs [default = no]
-	},
 	"rw": { # performs technology-independent rewriting of the AIG
 		"-l": None,			# toggle preserving the number of levels [default = yes]
 		"-z": None,			# toggle using zero-cost replacements [default = no]
@@ -115,6 +109,12 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 }
 
 ABC_CLEANUP_ARGUMENTS = {
+	"b": { # transforms the current network into a well-balanced AIG
+		"-l": None,			# toggle minimizing the number of levels [default = yes]
+		"-d": None,			# toggle duplication of logic [default = no]
+		"-s": None,			# toggle duplication on the critical paths [default = no]
+		"-x": None,			# toggle balancing multi-input EXORs [default = no]
+	},
 	"trim": None,	# removes POs def by constants and PIs wo fanouts
 	"cleanup": { # for AIGs, removes PIs w/o fanout and POs driven by const-0
 		"-i": None,			# toggles removing PIs without fanout [default = yes]

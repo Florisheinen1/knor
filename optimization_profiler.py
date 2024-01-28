@@ -930,17 +930,9 @@ def get_ABC_optimization_duplication_combos(test_size: TestSize) -> list[list[st
 
 	return duplication_combos
 
-def get_ABC_cleanup_arguments(test_size: TestSize) -> list[str]:
-	""" Returns list of all individual ABC cleanup commands and their variants. """
-	mutate_level = min(test_size.value, TestSize.Medium.value)
-	arguments: list[str] = []
-	for argument in ABC_CLEANUP_ARGUMENTS:
-		arguments.extend(get_ABC_argument_variations(argument, ABC_CLEANUP_ARGUMENTS[argument], mutate_level))
-	return arguments
-
-def get_all_ABC_cleanup_arguments(test_size) -> list[str]:
+def get_all_ABC_cleanup_arguments(test_size: TestSize) -> list[str]:
 	""" Returns list of all individual ABC cleanup commands and their variations. """
-	mutate_level = test_size.value
+	mutate_level = min(test_size.value, TestSize.Medium.value)
 
 	target_arguments = list(ABC_CLEANUP_ARGUMENTS.keys())
 	if test_size == TestSize.Small: target_arguments = ["trim", "cleanup"]
@@ -982,6 +974,31 @@ def get_ABC_premade_optimization_strategies() -> dict[str, list[str]]:
 		"src_rws":		["st", "rw -l", "rs -K 6 -N 2 -l", "rwz -l", "rs -K 9 -N 2 -l", "rwz -l", "rs -K 12 -N 2 -l"],
 	}
 	return strategies
+
+def get_balance_optimize_combos(test_size: TestSize) -> list[list[str]]:
+	""" Get all [balance, optimize] ABC argument combinations. """
+	optimize_arguments = get_all_ABC_optimization_arguments(test_size)
+	mutate_level = min(test_size.value, TestSize.Medium.value)
+	balance_arguments = get_ABC_argument_variations("b", ABC_CLEANUP_ARGUMENTS["b"], mutate_level)
+
+	balance_optimize_combos = []
+	for balance_argument in balance_arguments:
+		for optimize_argument in optimize_arguments:
+			balance_optimize_combos.append([balance_argument, optimize_argument])
+	return balance_optimize_combos
+
+def get_optimize_cleanup_combos(test_size: TestSize) -> list[list[str]]:
+	""" Get all [optimize, cleanup] ABC argument combinations. """
+	optimize_arguments = get_all_ABC_optimization_arguments(test_size)
+	mutate_level = min(test_size.value, TestSize.Medium.value)
+	cleanup_arguments = get_all_ABC_cleanup_arguments(test_size)
+
+	combos = []
+	for opt in optimize_arguments:
+		for clean in cleanup_arguments:
+			combos.append([opt, clean])
+	return combos
+
 
 def get_problem_files(profiler: ProfilerData, test_size: TestSize) -> list[dict]:
 	""" Returns a list of problem files whose name match the given regex, or all files if regex is None."""
@@ -1168,7 +1185,23 @@ def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
 # TEST: Balance before each opt command -> 6 hours
 # TEST: Cleanup after each opt command -> 6 hours
 
+# TOnight:
+# - Fix two graphs into paper
+# - Fix todos in paper
+# - Improve and add references
+					
+def fourth_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
+	profiler = ProfilerData(PROFILER_SOURCE)
+	test_7(profiler, test_size, thread_count, optimize_timeout_s)
+	profiler.save()
+	profiler.backup("4_AFTER_TEST_7")
 
+def test_7(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
+	""" Do balancing before optimizations """
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	balance_optimization_combos = get_balance_optimize_combos(test_size)
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, balance_optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
 def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
@@ -1195,8 +1228,6 @@ def third_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize)
 	profiler.save()
 
 	if KEYBOARD_INTERRUPT_HAS_BEEN_CALLED.is_set(): return
-
-
 
 def do_tests(thread_count: int, solve_timeout_s: float, optimize_timeout_s: float, test_size: TestSize):
 	# 1. Initialize profiler
@@ -1315,7 +1346,7 @@ def test_4(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 	""" Performs cleanup optimization commands on unoptimized solutions. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
-	cleanup_arguments = get_ABC_cleanup_arguments(test_size)
+	cleanup_arguments = get_all_ABC_cleanup_arguments(test_size)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
 	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, cleanup_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
@@ -1569,7 +1600,7 @@ def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
 	""" Data of cleanup optimization commands on unoptimized solutions. """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
-	cleanup_arguments = get_ABC_cleanup_arguments(test_size)
+	cleanup_arguments = get_all_ABC_cleanup_arguments(test_size)
 	cleanup_combos = list(map(lambda x: [x], cleanup_arguments))
 
 	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, cleanup_combos)
@@ -1607,7 +1638,7 @@ def get_test_4_data(profiler: ProfilerData, test_size: TestSize):
 				raw_data["gain"].append(gain)
 
 	return pd.DataFrame(raw_data)
-				
+
 def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 	""" Data of all premade optimization strategies. """
 	target_problem_files = get_problem_files(profiler, test_size)
@@ -1696,6 +1727,26 @@ def plot_test_1(test_size: TestSize = TestSize.Big):
 	plt.show()
 
 	return df
+
+def plot_test_6(test_size: TestSize = TestSize.Big):
+	df = pd.read_csv(Path("TEST_6_PLOT_DATA.csv"))
+
+	# df.groupby(["opt_args"]).agg({"gain": "median"})
+
+	# sorted_order = df.groupby(["opt_args"]).agg({"gain":"median"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:20]
+
+	# fitting_data = df[df["opt_args"].isin(sorted_order)]
+
+	sns.set_theme()
+	plotted = sns.relplot(data=df, kind="line", x="optimization_step", y="and_gates_after", hue="optimization_strategy")
+	
+	# plotted.set(xlabel="ABC optimization command", ylabel="gain")
+	
+	# plt.xticks(rotation=45)
+	
+	# TODO: Specify to use LaTeX font
+
+	plt.show()
 
 # Plot sample example AIG sizes to see the distribution
 
