@@ -25,9 +25,9 @@ UNMINIMIZED_AIG_FOLDER = Path("aigs_unminimized")
 MINIMIZED_AIG_FOLDER = Path("aigs_minimized")
 PROBLEM_FILES_FOLDER = Path("examples")
 
-PROFILER_SOURCE = Path("profiler_3_try.json")
-PROGRESS_SOURCE = Path("progress_3_try.txt")
-LOG_FILE_SOURCE = Path("logs_3_try.txt")
+PROFILER_SOURCE = Path("profiler_4_try.json")
+PROGRESS_SOURCE = Path("progress_4_try.txt")
+LOG_FILE_SOURCE = Path("logs_4_try.txt")
 
 AIG_PARSE_TIMEOUT_SECONDS = 20 # seconds
 
@@ -118,21 +118,22 @@ class ProfilerData:
 				LOG("Successfully loaded profiler.", VerbosityLevel.INFO)
 		else:
 			self.data = { "problem_files": [] }
-			LOG("Created new profiler data", VerbosityLevel.INFO)
+			LOG("Created new profiler data: {}".format(self.source), VerbosityLevel.INFO)
 			self.save()
 
-	# Saves current data to source file
 	def save(self):
+		""" Saves current data to source file. """
 		global LAST_TIME_SAVED
-		LOG("WARNING: Saving profiler data. Do not quit... ", VerbosityLevel.INFO)
-		LOG_PROGRESS("Saving profiler data. Do not stop program now...")
+		LOG("WARNING: Saving profiler data: {}. Do not quit... ".format(self.source), VerbosityLevel.INFO)
+		LOG_PROGRESS("Saving profiler data: {}. Do not stop program now...".format(self.source))
 		with open(self.source, 'w') as file:
 			json.dump(self.data, file)
 		LOG("Saved results in '{}'".format(self.source), VerbosityLevel.INFO)
-		LOG_PROGRESS("Done saving profiler data.")
+		LOG_PROGRESS("Done saving profiler data: {}".format(self.source))
 		LAST_TIME_SAVED = time.time()
 
 	def backup(self, name: str):
+		""" Creates backup of current data. """
 		now = datetime.now()
 		moment_str: str = "{}-{}-{}_{}-{}-{}".format(now.year, now.month, now.day, now.hour, now.minute, now.second)
 		output_file = Path("backup_{}_{}.json".format(name, moment_str))
