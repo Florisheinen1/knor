@@ -100,9 +100,9 @@ ABC_OPTIMIZATION_ARGUMENTS = {
 		"-l": None,			# toggle preserving the number of levels [default = yes]
 		"-z": None,			# toggle using zero-cost replacements [default = no]
 	},
-	"irws": { # perform sequential AIG rewriting
-		"-z": None,			# toggle using zero-cost replacements [default = no]
-	},
+	# "irws": { # perform sequential AIG rewriting
+	# 	"-z": None,			# toggle using zero-cost replacements [default = no]
+	# },
 	"iresyn": { # performs combinational resynthesis
 		"-l": None,			# toggle preserving the number of levels [default = yes]
 	},

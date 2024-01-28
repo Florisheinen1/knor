@@ -1,3 +1,4 @@
+from __future__ import annotations # To make it run on 3.8 as well
 from enum import Enum
 import json
 import itertools
@@ -976,11 +977,12 @@ def get_ABC_premade_optimization_strategies() -> dict[str, list[str]]:
 	}
 	return strategies
 
-def get_balance_optimize_combos(test_size: TestSize) -> list[list[str]]:
+def get_balance_optimize_combos(test_size: TestSize, index) -> list[list[str]]:
 	""" Get all [balance, optimize] ABC argument combinations. """
 	optimize_arguments = get_all_ABC_optimization_arguments(test_size)
 	mutate_level = min(test_size.value, TestSize.Medium.value)
-	balance_arguments = get_ABC_argument_variations("b", ABC_CLEANUP_ARGUMENTS["b"], mutate_level)
+
+	balance_arguments = get_ABC_argument_variations("b", ABC_CLEANUP_ARGUMENTS["b"], mutate_level)[index*4:index*4+4]
 
 	balance_optimize_combos = []
 	for balance_argument in balance_arguments:
@@ -1191,17 +1193,17 @@ def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
 # - Fix todos in paper
 # - Improve and add references
 					
-def fourth_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
+def fifth_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize, index: int):
 	profiler = ProfilerData(PROFILER_SOURCE)
-	test_7(profiler, test_size, thread_count, optimize_timeout_s)
+	test_7(profiler, test_size, thread_count, optimize_timeout_s, index)
 	profiler.save()
-	profiler.backup("4_AFTER_TEST_7")
+	profiler.backup("5_AFTER_TEST_7_i{}".format(index))
 
-def test_7(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float):
+def test_7(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float, index: int):
 	""" Do balancing before optimizations """
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
-	balance_optimization_combos = get_balance_optimize_combos(test_size)
+	balance_optimization_combos = get_balance_optimize_combos(test_size, index)
 	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, balance_optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
