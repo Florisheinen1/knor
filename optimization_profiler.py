@@ -1201,9 +1201,11 @@ def fifth_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize,
 
 def test_7(profiler: ProfilerData, test_size: TestSize, thread_count: int, optimize_timeout_s: float, index: int):
 	""" Do balancing before optimizations """
+	LOG_PROGRESS("Starting the test 7 with i: {}".format(index))
 	target_problem_files = get_problem_files(profiler, test_size)
 	target_knor_arg_combos = get_knor_flag_combinations(test_size)
 	balance_optimization_combos = get_balance_optimize_combos(test_size, index)
+	LOG_PROGRESS("Found: {}".format(len(balance_optimization_combos)))
 	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, balance_optimization_combos, timeout_seconds=optimize_timeout_s, n_threads=thread_count)
 
 
@@ -1657,7 +1659,7 @@ def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 	raw_data = {
 		"optimization_strategy": [],
 		"optimization_step": [],
-		"and_gates_after": [],
+		"gain_so_far": [],
 		"argument_performed": []
 	}
 
@@ -1679,24 +1681,22 @@ def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 				if strategy_args_str not in succeeded_opt_args:
 					continue
 				
-				# Start with the base entry
-				raw_data["optimization_strategy"].append(strategy)
-				raw_data["optimization_step"].append(0)
-				raw_data["and_gates_after"].append(base_AND_count)
-				raw_data["argument_performed"].append("SOLVE")
-
-				for step in range(1, len(strategy_args)):
-					built_up = strategy_args[:step]
+				built_up = []
+				for step in strategy_args:
+					built_up.append(step)
 
 					matching_opt = get_optimization_with_args(solve_attempt["optimizations"], built_up)
 					if not matching_opt:
 						LOG("Could not find necessary optimization: {}".format(built_up), VerbosityLevel.ERROR)
 						continue
+					
+					current_AND_count = matching_opt["data"]["and_gates"]
+					total_gain_so_far = base_AND_count / current_AND_count
 
 					# We found it!
 					raw_data["optimization_strategy"].append(strategy)
-					raw_data["optimization_step"].append(step)
-					raw_data["and_gates_after"].append(matching_opt["data"]["and_gates"])
+					raw_data["optimization_step"].append(len(built_up)-1)
+					raw_data["gain_so_far"].append(total_gain_so_far)
 					raw_data["argument_performed"].append(built_up[-1])
 
 	df = pd.DataFrame(raw_data)
@@ -1709,21 +1709,28 @@ def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 
 
 def plot_test_1(test_size: TestSize = TestSize.Big):
-	profiler = ProfilerData(PROFILER_SOURCE)
-	df, _, _ = get_test_1_data(profiler, test_size)
-	# df = pd.read_csv(Path("TEST_1_PLOT_DATA.csv"))
+	# profiler = ProfilerData(PROFILER_SOURCE)
+	# df, _, _ = get_test_1_data(profiler, test_size)
+	df = pd.read_csv(Path("TEST_1_PLOT_DATA.csv"))
 	df.groupby(["opt_args"]).agg({"gain": "median"})
 
-	sorted_order = df.groupby(["opt_args"]).agg({"gain":"median"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:20]
+	sorted_order = df.groupby(["opt_args"]).agg({"gain":"median"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:15]
 
 	fitting_data = df[df["opt_args"].isin(sorted_order)]
 
 	sns.set_theme()
-	plotted = sns.catplot(data=fitting_data, kind="boxen", x="opt_args", y="gain", order=sorted_order)
+
+	from matplotlib.font_manager import fontManager, FontProperties
+	path = Path("TimesNewRoman.ttf")
+	fontManager.addfont(path)
+	prop = FontProperties(fname=path)
+	sns.set(font=prop.get_name(), font_scale=2)
+
+	plotted = sns.catplot(data=fitting_data, kind="boxen", x="gain", y="opt_args", order=sorted_order, height=10, aspect=8/10)
 	
-	plotted.set(xlabel="ABC optimization command", ylabel="gain")
+	plotted.set(xlabel="Gain", ylabel="ABC optimization command")
 	
-	plt.xticks(rotation=45)
+	# plt.xticks(rotation=90)
 	
 	# TODO: Specify to use LaTeX font
 
@@ -1731,17 +1738,54 @@ def plot_test_1(test_size: TestSize = TestSize.Big):
 
 	return df
 
-def plot_test_6(test_size: TestSize = TestSize.Big):
-	df = pd.read_csv(Path("TEST_6_PLOT_DATA.csv"))
+def plot_test_4(test_size: TestSize = TestSize.Big):
+	df = pd.read_csv(Path("TEST_4_PLOT_DATA.csv"))
 
-	# df.groupby(["opt_args"]).agg({"gain": "median"})
+	sorted_top_args = df.groupby(["opt_args"]).agg({"gain": "mean"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:10]
 
-	# sorted_order = df.groupby(["opt_args"]).agg({"gain":"median"}).sort_values(["gain"], ascending=False).reset_index()["opt_args"].values[:20]
-
-	# fitting_data = df[df["opt_args"].isin(sorted_order)]
+	filtered_data = df[df["opt_args"].isin(sorted_top_args)]
 
 	sns.set_theme()
-	plotted = sns.relplot(data=df, kind="line", x="optimization_step", y="and_gates_after", hue="optimization_strategy")
+
+	from matplotlib.font_manager import fontManager, FontProperties
+	path = Path("TimesNewRoman.ttf")
+	fontManager.addfont(path)
+	prop = FontProperties(fname=path)
+	sns.set(font=prop.get_name(), font_scale=2)
+
+	plotted = sns.catplot(data=filtered_data, kind="boxen", x="gain", y="opt_args", order=sorted_top_args, height=10, aspect=10/10)
+	
+	plotted.set(xlabel="Gain", ylabel="ABC optimization command")
+	
+	plt.xticks([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
+	
+	# TODO: Specify to use LaTeX font
+
+	plt.show()
+
+
+	return df
+
+
+
+def plot_test_6(test_size: TestSize = TestSize.Big):
+	df = pd.read_csv(Path("TEST_6_FINAL_PLOT_DATA.csv"))
+
+	sns.set_theme()
+
+	from matplotlib.font_manager import fontManager, FontProperties
+	path = Path("TimesNewRoman.ttf")
+	fontManager.addfont(path)
+	prop = FontProperties(fname=path)
+	sns.set(font=prop.get_name(), font_scale=2)
+
+	plotted = sns.relplot(data=df, kind="line", x="optimization_step", y="gain_so_far", hue="optimization_strategy", height=10, aspect=10/5)
+	
+	# plotted.set(xlabel="Gain", ylabel="ABC optimization command")
+	
+	# plt.xticks([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
+
+
 	
 	# plotted.set(xlabel="ABC optimization command", ylabel="gain")
 	
