@@ -959,10 +959,9 @@ def get_ABC_cleanup_arguments_sandwiched_in_optimization_duos(test_size: TestSiz
 def get_ABC_premade_optimization_strategies() -> dict[str, list[str]]:
 	""" Returns a dict of all already existing optimization strategies names with their list of optimization commands. """
 	strategies: dict[str, list[str]] = {
-		"c2rs":			["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
+		"compress2rs":	["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
 		"compress":		["b -l", "rw -l", "rwz -l", "b -l", "rwz -l", "b -l"],
 		"compress2":	["b -l", "rw -l", "rf -l", "b -l", "rw -l", "rwz -l", "b -l", "rfz -l", "rwz -l", "b -l"],
-		"compress2rs":	["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
 		"drwsat2":		["st", "drw", "b -l", "drw", "drf", "ifraig -C 20", "drw", "b -l", "drw", "drf"],
 		"r2rs":			["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
 		"resyn":		["b", "rw", "rwz", "b", "rwz", "b"],
@@ -1192,7 +1191,16 @@ def fix_profiler_structure(profiler: ProfilerData, use_tqdm: bool = False):
 # - Fix two graphs into paper
 # - Fix todos in paper
 # - Improve and add references
-					
+
+def test_8(thread_count: int, optimize_timeout_s: float, test_size: TestSize):
+	profiler = ProfilerData(PROFILER_SOURCE)
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	combo = ["scorr", "balance", "dc2", "dc2", "balance", "dc2", "dc2"]
+	execute_optimizations_on_solutions(profiler, target_problem_files, target_knor_arg_combos, [combo], optimize_timeout_s, n_threads=thread_count)
+	profiler.save()
+	profiler.backup("8_AFTER_8")
+
 def fifth_try(thread_count: int, optimize_timeout_s: float, test_size: TestSize, index: int):
 	profiler = ProfilerData(PROFILER_SOURCE)
 	test_7(profiler, test_size, thread_count, optimize_timeout_s, index)
@@ -1399,11 +1407,6 @@ def test_6(profiler: ProfilerData, test_size: TestSize, thread_count: int, optim
 6. Figure out best premade optimization strategy
 
 """
-
-# ///////// # TODO: Collect better argument flag combinations (perhaps in reproducible way)
-# ///////// # TODO: Collect argument combinations per plan.
-# ///////// # TODO: Figure out why some argumen flag combinations do not work
-# /// # TODO: Improve logging for better debugging
 
 # TODO: Make solving also parrallel
 
@@ -1702,8 +1705,61 @@ def get_test_6_data(profiler: ProfilerData, test_size: TestSize):
 	df = pd.DataFrame(raw_data)
 	return df
 
-
+def get_test_7_data(profiler: ProfilerData, test_size: TestSize, index: int):
+	target_problem_files = get_problem_files(profiler, test_size)
+	target_knor_arg_combos = get_knor_flag_combinations(test_size)
+	target_opt_combos = get_balance_optimize_combos(test_size, index)
 	
+	crashed_files, crashed_knor_args, crashed_opt_args, missing_files, missing_knor_args, missing_opt_args = get_crashes_or_incompletes(target_problem_files, target_knor_arg_combos, target_opt_args)
+
+	succeeded_problem_files: list[str] = [file["source"] for file in target_problem_files if file["source"] not in crashed_files and file["source"] not in missing_files]
+	succeeded_solve_args: list[str] = ["".join(args) for args in target_knor_arg_combos if "".join(args) not in crashed_knor_args and "".join(args) not in missing_knor_args]
+	succeeded_opt_args: list[str] = ["".join(args) for args in target_opt_combos if "".join(args) not in crashed_opt_args and "".join(args) not in missing_opt_args]
+
+	raw_data = {
+		"optimization_combo": [],	# String like "-f-l-K 5-b"
+		"optimization_step": [],	# 1
+		"argument_performed": [],	# '-l'
+		"gain_so_far": [],			# 1.2
+	}
+
+	for problem_file in target_problem_files:
+		source = problem_file["source"]
+		if source not in succeeded_problem_files:
+			LOG("Skipping required problem file data: {}".format(source), VerbosityLevel.ERROR)
+			continue
+		for solve_attempt in problem_file["solve_attempts"]:
+			knor_args_used = "".join(solve_attempt["args_used"])
+			if knor_args_used not in succeeded_solve_args:
+				continue
+			
+			base_AND_count = solve_attempt["data"]["and_gates"]
+
+			for target_opt_combo in target_opt_combos:
+				
+				target_opt_combo_str: str = "".join(target_opt_combo)
+				if target_opt_combo_str not in succeeded_opt_args:
+					continue
+				
+				built_up = []
+				for step in target_opt_combo:
+					built_up.append(step)
+
+					matching_opt = get_optimization_with_args(solve_attempt["optimizations"], built_up)
+					if not matching_opt:
+						LOG("Could not find necessary optimization: {}".format(built_up), VerbosityLevel.ERROR)
+						continue
+					
+					current_AND_count = matching_opt["data"]["and_gates"]
+					total_gain_so_far = base_AND_count / current_AND_count
+
+					# We found it!
+					raw_data["optimization_strategy"].append(target_opt_combo_str)
+					raw_data["optimization_step"].append(len(built_up)-1)
+					raw_data["gain_so_far"].append(total_gain_so_far)
+					raw_data["argument_performed"].append(built_up[-1])
+	return raw_data
+
 
 # =============================================================
 
@@ -1751,9 +1807,9 @@ def plot_test_4(test_size: TestSize = TestSize.Big):
 	path = Path("TimesNewRoman.ttf")
 	fontManager.addfont(path)
 	prop = FontProperties(fname=path)
-	sns.set(font=prop.get_name(), font_scale=2)
+	sns.set(font=prop.get_name(), font_scale=3)
 
-	plotted = sns.catplot(data=filtered_data, kind="boxen", x="gain", y="opt_args", order=sorted_top_args, height=10, aspect=10/10)
+	plotted = sns.catplot(data=filtered_data, kind="boxen", x="gain", y="opt_args", hue="opt_args", dashes="opt_args", order=sorted_top_args, height=10, aspect=10/10)
 	
 	plotted.set(xlabel="Gain", ylabel="ABC optimization command")
 	
@@ -1779,12 +1835,24 @@ def plot_test_6(test_size: TestSize = TestSize.Big):
 	prop = FontProperties(fname=path)
 	sns.set(font=prop.get_name(), font_scale=2)
 
-	plotted = sns.relplot(data=df, kind="line", x="optimization_step", y="gain_so_far", hue="optimization_strategy", height=10, aspect=10/5)
+	half_data = list(df["optimization_strategy"].unique())[::2]
+	other = list(df["optimization_strategy"].unique())[1::2]
+
+	plotted1 = sns.relplot(data=df[df["optimization_strategy"].isin(other)], kind="line", x="optimization_step", y="gain_so_far", hue="optimization_strategy", height=10, aspect=10/5, linewidth=3)
+	# plotted2 = sns.relplot(data=df[df["optimization_strategy"].isin(other)], kind="line", x="optimization_step", y="gain_so_far", hue="optimization_strategy", height=10, aspect=10/5, linewidth=3)
 	
+	plotted1._legend.set_title("Strategy")
+	# plotted2._legend.set_title("Strategy")
+
+	plotted1.set(xlabel="Optimization step", ylabel="Total gain")
+	# plotted2.set(xlabel="Optimization step", ylabel="Total gain")
+
+
 	# plotted.set(xlabel="Gain", ylabel="ABC optimization command")
 	
 	# plt.xticks([1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
 
+	plt.xticks([x for x in range(20)])
 
 	
 	# plotted.set(xlabel="ABC optimization command", ylabel="gain")
