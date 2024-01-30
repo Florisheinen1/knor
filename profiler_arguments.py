@@ -172,6 +172,28 @@ ABC_CLEANUP_ARGUMENTS = {
 	}
 }
 
+ABC_PREMADE_STRATEGIES: dict[str, list[str]] = {
+	"compress2rs":	["b -l", "rs -K 6 -l", "rw -l", "rs -K 6 -N 2 -l", "rf -l", "rs -K 8 -l", "b -l", "rs -K 8 -N 2 -l", "rw -l", "rs -K 10 -l", "rwz -l", "rs -K 10 -N 2 -l", "b -l", "rs -K 12 -l", "rfz -l", "rs -K 12 -N 2 -l", "rwz -l", "b -l"],
+	"compress":		["b -l", "rw -l", "rwz -l", "b -l", "rwz -l", "b -l"],
+	"compress2":	["b -l", "rw -l", "rf -l", "b -l", "rw -l", "rwz -l", "b -l", "rfz -l", "rwz -l", "b -l"],
+	"drwsat2":		["st", "drw", "b -l", "drw", "drf", "ifraig -C 20", "drw", "b -l", "drw", "drf"],
+	"r2rs":			["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
+	"resyn":		["b", "rw", "rwz", "b", "rwz", "b"],
+	"resyn2":		["b", "rw", "rf", "b", "rw", "rwz", "b", "rfz", "rwz", "b"],
+	"resyn2a":		["b", "rw", "b", "rw", "rwz", "b", "rwz", "b"],
+	"resyn2rs":		["b", "rs -K 6", "rw", "rs -K 6 -N 2", "rf", "rs -K 8", "b", "rs -K 8 -N 2", "rw", "rs -K 10", "rwz", "rs -K 10 -N 2", "b", "rs -K 12", "rfz", "rs -K 12 -N 2", "rwz", "b"],
+	"resyn3":		["b", "rs", "rs -K 6", "b", "rsz", "rsz -K 6", "b", "rsz -K 5", "b"],
+	"rwsat":		["st", "rw -l", "b -l", "rw -l", "rf -l"],
+	"src_rs":		["st", "rs -K 6 -N 2 -l", "rs -K 9 -N 2 -l", "rs -K 12 -N 2 -l"],
+	"src_rw":		["st", "rw -l", "rwz -l", "rwz -l"],
+	"src_rws":		["st", "rw -l", "rs -K 6 -N 2 -l", "rwz -l", "rs -K 9 -N 2 -l", "rwz -l", "rs -K 12 -N 2 -l"],
+}
+
+ABC_CUSTOM_STRATEGIES: list[list[str]] = [
+	["ssweep", "balance -l", "dc2", "dc2", "balance -l", "dc2", "dc2"],
+	["scorr", "balance -l", "dc2", "dc2", "balance -l", "dc2", "dc2"],
+]
+
 # FROM_AIG = [
 # 	("collapse", [		# collapses the network by constructing global BDDs
 #   		"-r",			# toggles dynamic variable reordering -> off

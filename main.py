@@ -1,9 +1,8 @@
 from optimization_profiler import *
 
 LAPTOP = False
-i = 0
 
 if LAPTOP:
-	fifth_try(3, 10, TestSize.Small, i)
+	test_8(3, 10, TestSize.Small)
 else:
-	fifth_try(40, 60, TestSize.Big, i)
+	test_8(20, 60, TestSize.Big)
